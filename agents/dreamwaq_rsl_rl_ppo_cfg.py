@@ -1,4 +1,4 @@
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from .rsl_rl_ppo_cfg import UnitreeA1RoughPPORunnerCfg
 

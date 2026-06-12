@@ -1,4 +1,4 @@
-from isaaclab.utils import configclass
+from isaaclab.utils.configclass import configclass
 
 from .rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 
