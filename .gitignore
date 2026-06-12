@@ -4,3 +4,9 @@ __pycache__/
 *.egg-info/
 .DS_Store
 .vscode/
+flat_env_cfg.py
+rough_env_cfg.py
+sb3_ppo_cfg.yaml
+skrl_flat_ppo_cfg.yaml
+skrl_rough_ppo_cfg.yaml
+
