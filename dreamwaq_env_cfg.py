@@ -51,6 +51,11 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
 
         # actor: remove exteroceptive observations
         self.observations.policy.height_scan = None
+        self.observations.policy.base_lin_vel = None
+
+        # actor: temporal observation history
+        self.observations.policy.history_length = 5
+        self.observations.policy.flatten_history_dim = True
 
         # critic: privileged observation
         self.observations.critic = DreamWaQCriticObsCfg()
@@ -63,6 +68,10 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
 
         self.observations.policy.enable_corruption = False
         self.observations.policy.height_scan = None
+        self.observations.policy.base_lin_vel = None
+
+        self.observations.policy.history_length = 5
+        self.observations.policy.flatten_history_dim = True
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None
