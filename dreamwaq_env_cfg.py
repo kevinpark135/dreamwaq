@@ -8,9 +8,18 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # 여기부터 DreamWaQ 전용 변경사항을 하나씩 넣을 자리
-        # 처음에는 아무것도 바꾸지 말고, 태스크 등록/학습 실행 확인부터 한다.
-        pass
+        # rewards
+        self.rewards.track_lin_vel_xy_exp.weight = 1.0
+        self.rewards.track_ang_vel_z_exp.weight = 0.5
+        self.rewards.lin_vel_z_l2.weight = -2.0
+        self.rewards.ang_vel_xy_l2.weight = -0.05
+        self.rewards.flat_orientation_l2.weight = -0.2
+        self.rewards.dof_acc_l2.weight = -2.5e-7
+        self.rewards.dof_torques_l2.weight = -2.0e-5
+        self.rewards.action_rate_l2.weight = -0.01
+
+        # remove exteroceptive observations
+        self.observations.policy.height_scan = None
 
 
 @configclass
@@ -18,5 +27,8 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
     def __post_init__(self):
         super().__post_init__()
 
-        # play 전용 설정도 나중에 여기서 조정
-        pass
+        self.observations.policy.enable_corruption = False
+        self.observations.policy.height_scan = None
+
+        self.events.base_external_force_torque = None
+        self.events.push_robot = None
