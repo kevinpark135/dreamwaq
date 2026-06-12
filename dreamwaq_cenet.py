@@ -1,4 +1,16 @@
 # dreamwaq_cenet.py
+"""CENet module for DreamWaQ.
+
+This file defines the Context-Aided Estimator Network used by DreamWaQ.
+CENet receives flattened temporal proprioceptive observation history and
+jointly learns:
+1. explicit base linear velocity estimation,
+2. latent context representation through a beta-VAE,
+3. next-observation reconstruction as an auxiliary task.
+
+This module is currently standalone. It is not yet connected to the rsl_rl
+PPO actor-critic training loop.
+"""
 
 import torch
 import torch.nn as nn
@@ -19,8 +31,8 @@ class DreamWaQCENet(nn.Module):
 
     def __init__(
         self,
-        obs_history_dim: 45,
-        single_obs_dim: 225,
+        obs_history_dim: int,
+        single_obs_dim: int,
         latent_dim: int = 16,
         hidden_dims: tuple[int, int] = (128, 64),
     ):
