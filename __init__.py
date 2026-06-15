@@ -61,7 +61,7 @@ gym.register(
 
 gym.register(
     id="Isaac-DreamWaQ-A1-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    entry_point=f"{__name__}.dreamwaq_env:DreamWaQEnv",
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg",
@@ -71,7 +71,7 @@ gym.register(
 
 gym.register(
     id="Isaac-DreamWaQ-A1-Play-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    entry_point=f"{__name__}.dreamwaq_env:DreamWaQEnv",
     disable_env_checker=True,
     kwargs={
          "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg_PLAY",
