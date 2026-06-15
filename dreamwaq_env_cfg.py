@@ -1,3 +1,5 @@
+"""DreamWaQ environment configuration for four-legged locomotion with proprioceptive history and privileged critic observations."""
+
 from isaaclab.utils.configclass import configclass
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -36,6 +38,9 @@ class DreamWaQCriticObsCfg(ObsGroup):
 
 @configclass
 class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
+    # actor: temporal observation history
+    obs_history_length: int = 5
+    
     def __post_init__(self):
         super().__post_init__()
 
@@ -52,10 +57,6 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         # actor: remove exteroceptive observations
         self.observations.policy.height_scan = None
         self.observations.policy.base_lin_vel = None
-
-        # actor: temporal observation history
-        self.observations.policy.history_length = 5
-        self.observations.policy.flatten_history_dim = True
 
         # critic: privileged observation
         self.observations.critic = DreamWaQCriticObsCfg()

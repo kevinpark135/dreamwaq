@@ -60,7 +60,7 @@ gym.register(
 )
 
 gym.register(
-    id="Isaac-DreamWaQ-A1",
+    id="Isaac-DreamWaQ-A1-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
@@ -70,7 +70,7 @@ gym.register(
 )
 
 gym.register(
-    id="Isaac-DreamWaQ-A1-Play",
+    id="Isaac-DreamWaQ-A1-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
