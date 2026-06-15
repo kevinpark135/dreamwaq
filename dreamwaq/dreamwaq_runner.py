@@ -102,6 +102,17 @@ class DreamWaQRunner(OnPolicyRunner):
             shape=(self.single_obs_dim,),
             device=self.device,
         )
+        self.adaboot_probability = 0.0
+        self.adaboot_reward_cv = 0.0
+        self.adaboot_episode_returns = torch.zeros(
+            self.base_env.num_envs,
+            device=self.device,
+        )
+        self.adaboot_episode_valid = torch.ones(
+            self.base_env.num_envs,
+            dtype=torch.bool,
+            device=self.device,
+        )
 
     def _normalize_history(self, obs_history):
         original_shape = obs_history.shape
@@ -112,14 +123,46 @@ class DreamWaQRunner(OnPolicyRunner):
 
         return normalized.reshape(original_shape)
 
-    def _add_cenet_features(self, obs):
-        """Replace placeholder observations with CENet outputs."""
+    @torch.no_grad()
+    def _update_adaboot(self, completed_returns):
+        if completed_returns.numel() < 2:
+            return
+
+        reward_mean = completed_returns.mean()
+        reward_std = completed_returns.std(unbiased=False)
+        reward_cv = reward_std / reward_mean.abs().clamp_min(1e-6)
+        probability = 1.0 - torch.tanh(reward_cv)
+
+        self.adaboot_reward_cv = reward_cv.item()
+        self.adaboot_probability = probability.clamp(0.0, 1.0).item()
+
+    def _add_cenet_features(self, obs, use_adaboot=False):
+        """Add CENet features, optionally applying AdaBoot."""
         obs_history = self.base_env.obs_history.to(self.device)
         obs_history = self._normalize_history(obs_history)
         cenet_out = self.cenet(obs_history)
 
+        estimated_velocity = cenet_out["v_hat"]
+
+        if use_adaboot:
+            ground_truth_velocity = (
+                self.base_env.scene["robot"].data.root_lin_vel_b.to(self.device)
+            )
+            bootstrap_mask = torch.rand(
+                estimated_velocity.shape[0],
+                1,
+                device=self.device,
+            ) < self.adaboot_probability
+            actor_velocity = torch.where(
+                bootstrap_mask,
+                estimated_velocity,
+                ground_truth_velocity,
+            )
+        else:
+            actor_velocity = estimated_velocity
+
         cenet_features = torch.cat(
-            (cenet_out["v_hat"], cenet_out["z"]),
+            (actor_velocity, cenet_out["z"]),
             dim=-1,
         )
 
@@ -140,13 +183,14 @@ class DreamWaQRunner(OnPolicyRunner):
                 self.env.episode_length_buf,
                 high=int(self.env.max_episode_length)
             )
+            self.adaboot_episode_valid.zero_()
 
         obs = self.env.get_observations().to(self.device)
         self.alg.train_mode()
         self.cenet.train()
 
         with torch.inference_mode():
-            obs = self._add_cenet_features(obs)
+            obs = self._add_cenet_features(obs, use_adaboot=True)
 
         if self.is_distributed:
             raise NotImplementedError(
@@ -162,12 +206,14 @@ class DreamWaQRunner(OnPolicyRunner):
             start = time.time()
 
             with torch.inference_mode():
-                obs = self._add_cenet_features(obs)
+                obs = self._add_cenet_features(obs, use_adaboot=True)
 
             obs_history_buf = []
             next_obs_buf = []
             base_lin_vel_buf = []
             valid_transition_buf = []
+            completed_episode_returns = []
+            num_completed_episodes = 0
 
             with torch.inference_mode():
                 for _ in range(self.cfg["num_steps_per_env"]):
@@ -181,12 +227,30 @@ class DreamWaQRunner(OnPolicyRunner):
                         actions.to(self.env.device)
                     )
 
+                    step_rewards = rewards.to(self.device).reshape(-1)
+                    done_mask = dones.to(self.device).bool().reshape(-1)
+                    self.adaboot_episode_returns += step_rewards
+
+                    valid_done_mask = done_mask & self.adaboot_episode_valid
+                    if valid_done_mask.any():
+                        completed_episode_returns.append(
+                            self.adaboot_episode_returns[
+                                valid_done_mask
+                            ].clone()
+                        )
+
+                    self.adaboot_episode_returns[done_mask] = 0.0
+                    self.adaboot_episode_valid[done_mask] = True
+
                     if self.cfg.get("check_for_nan", True):
                         check_nan(obs, rewards, dones)
 
                     next_obs_buf.append(obs["policy"].clone())
                     valid_transition_buf.append(~dones.bool())
-                    obs = self._add_cenet_features(obs)
+                    obs = self._add_cenet_features(
+                        obs,
+                        use_adaboot=True,
+                    )
 
                     obs, rewards, dones = (
                         obs.to(self.device),
@@ -203,6 +267,11 @@ class DreamWaQRunner(OnPolicyRunner):
                     self.logger.process_env_step(
                         rewards, dones, extras, intrinsic_rewards
                     )
+
+                if completed_episode_returns:
+                    completed_returns = torch.cat(completed_episode_returns)
+                    num_completed_episodes = completed_returns.numel()
+                    self._update_adaboot(completed_returns)
 
                 stop = time.time()
                 collect_time = stop - start
@@ -314,6 +383,9 @@ class DreamWaQRunner(OnPolicyRunner):
                 loss_dict["CENet/kl"] = 0.0
 
             loss_dict["CENet/valid_samples"] = num_valid_samples
+            loss_dict["AdaBoot/probability"] = self.adaboot_probability
+            loss_dict["AdaBoot/reward_cv"] = self.adaboot_reward_cv
+            loss_dict["AdaBoot/completed_episodes"] = num_completed_episodes
 
             learn_time = time.time() - start
             self.current_learning_iteration = it
@@ -356,6 +428,8 @@ class DreamWaQRunner(OnPolicyRunner):
         saved_dict["cenet_obs_normalizer"] = (
             self.cenet_obs_normalizer.state_dict()
         )
+        saved_dict["adaboot_probability"] = self.adaboot_probability
+        saved_dict["adaboot_reward_cv"] = self.adaboot_reward_cv
         torch.save(saved_dict, path)
         self.logger.save_model(path, self.current_learning_iteration)
 
@@ -371,6 +445,14 @@ class DreamWaQRunner(OnPolicyRunner):
             self.cenet_obs_normalizer.load_state_dict(
                 loaded_dict["cenet_obs_normalizer"]
             )
+        self.adaboot_probability = loaded_dict.get(
+            "adaboot_probability",
+            0.0,
+        )
+        self.adaboot_reward_cv = loaded_dict.get(
+            "adaboot_reward_cv",
+            0.0,
+        )
 
         if load_iteration:
             self.current_learning_iteration = loaded_dict["iter"]
