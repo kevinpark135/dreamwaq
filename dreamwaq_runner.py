@@ -72,10 +72,14 @@ class DreamWaQRunner(OnPolicyRunner):
             obs_history_buf = []
             next_obs_buf = []
             base_lin_vel_buf = []
+            valid_transition_buf = []
 
             with torch.inference_mode():
                 for _ in range(self.cfg["num_steps_per_env"]):
                     obs_history_buf.append(self.base_env.obs_history.clone())
+                    base_lin_vel_buf.append(
+                        self.base_env.scene["robot"].data.root_lin_vel_b.clone()
+                    )
 
                     actions = self.alg.act(obs)
                     obs, rewards, dones, extras = self.env.step(
@@ -86,9 +90,7 @@ class DreamWaQRunner(OnPolicyRunner):
                         check_nan(obs, rewards, dones)
 
                     next_obs_buf.append(obs["policy"].clone())
-                    base_lin_vel_buf.append(
-                        self.base_env.scene["robot"].data.root_lin_vel_b.clone()
-                    )
+                    valid_transition_buf.append(~dones.bool())
 
                     obs, rewards, dones = (
                         obs.to(self.device),
@@ -122,23 +124,40 @@ class DreamWaQRunner(OnPolicyRunner):
             base_lin_vel_tensor = torch.stack(base_lin_vel_buf).reshape(
                 -1, 3
             ).to(self.device)
+            valid_transition_tensor = torch.stack(valid_transition_buf).reshape(
+                -1
+            ).to(self.device)
 
-            cenet_out = self.cenet(obs_history_tensor)
-            ce_loss = cenet_loss(
-                cenet_out,
-                target_base_lin_vel=base_lin_vel_tensor,
-                target_next_obs=next_obs_tensor,
-                beta=1.0,
-            )
+            obs_history_tensor = obs_history_tensor[valid_transition_tensor]
+            next_obs_tensor = next_obs_tensor[valid_transition_tensor]
+            base_lin_vel_tensor = base_lin_vel_tensor[valid_transition_tensor]
 
-            self.cenet_optimizer.zero_grad()
-            ce_loss["total_loss"].backward()
-            self.cenet_optimizer.step()
+            if obs_history_tensor.shape[0] > 0:
+                cenet_out = self.cenet(obs_history_tensor)
+                ce_loss = cenet_loss(
+                    cenet_out,
+                    target_base_lin_vel=base_lin_vel_tensor,
+                    target_next_obs=next_obs_tensor,
+                    beta=1.0,
+                )
 
-            loss_dict["CENet/total"] = ce_loss["total_loss"].item()
-            loss_dict["CENet/velocity"] = ce_loss["velocity_loss"].item()
-            loss_dict["CENet/reconstruction"] = ce_loss["reconstruction_loss"].item()
-            loss_dict["CENet/kl"] = ce_loss["kl_loss"].item()
+                self.cenet_optimizer.zero_grad()
+                ce_loss["total_loss"].backward()
+                self.cenet_optimizer.step()
+
+                loss_dict["CENet/total"] = ce_loss["total_loss"].item()
+                loss_dict["CENet/velocity"] = ce_loss["velocity_loss"].item()
+                loss_dict["CENet/reconstruction"] = ce_loss[
+                    "reconstruction_loss"
+                ].item()
+                loss_dict["CENet/kl"] = ce_loss["kl_loss"].item()
+            else:
+                loss_dict["CENet/total"] = 0.0
+                loss_dict["CENet/velocity"] = 0.0
+                loss_dict["CENet/reconstruction"] = 0.0
+                loss_dict["CENet/kl"] = 0.0
+
+            loss_dict["CENet/valid_samples"] = obs_history_tensor.shape[0]
 
             learn_time = time.time() - start
             self.current_learning_iteration = it

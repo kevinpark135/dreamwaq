@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata as metadata
 import os
 import sys
 import time
@@ -13,7 +14,11 @@ import gymnasium as gym
 
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.utils.io import dump_yaml
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+from isaaclab_rl.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlVecEnvWrapper,
+    handle_deprecated_rsl_rl_cfg,
+)
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import (
     add_launcher_args,
@@ -70,6 +75,15 @@ def main(
             agent_cfg.max_iterations = args_cli.max_iterations
         if args_cli.seed is not None:
             agent_cfg.seed = args_cli.seed
+
+        installed_rsl_rl_version = metadata.version("rsl-rl-lib")
+        agent_cfg = handle_deprecated_rsl_rl_cfg(
+            agent_cfg, installed_rsl_rl_version
+        )
+        agent_cfg.obs_groups = {
+            "actor": ["policy"],
+            "critic": ["critic"],
+        }
 
         env_cfg.seed = agent_cfg.seed
         if args_cli.device is not None:
