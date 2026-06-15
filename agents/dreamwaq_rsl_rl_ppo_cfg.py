@@ -8,4 +8,6 @@ class DreamWaQA1RoughPPORunnerCfg(UnitreeA1RoughPPORunnerCfg):
         super().__post_init__()
 
         self.experiment_name = "dreamwaq_a1_rough"
+        self.actor.obs_normalization = True
+        self.critic.obs_normalization = True
         self.max_iterations = 1000
