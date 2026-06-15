@@ -4,14 +4,104 @@ import torch
 from isaaclab.utils.configclass import configclass
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers.manager_base import ManagerTermBase
 
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 
+
 def empty_cenet_features(env) -> torch.Tensor:
     return torch.zeros((env.num_envs, 19), device=env.device)
+
+
+def joint_power(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize total absolute mechanical power across all joints."""
+    robot = env.scene[asset_cfg.name]
+    torque = robot.data.applied_torque[:, asset_cfg.joint_ids]
+    joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+    return torch.sum(torch.abs(torque) * torch.abs(joint_vel), dim=1)
+
+
+def foot_clearance(
+    env,
+    target_height: float,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize moving feet that deviate from the desired terrain-relative height."""
+    robot = env.scene[asset_cfg.name]
+    height_scanner = env.scene[sensor_cfg.name]
+
+    terrain_height = torch.mean(
+        height_scanner.data.ray_hits_w[..., 2],
+        dim=1,
+    )
+    foot_height = (
+        robot.data.body_pos_w[:, asset_cfg.body_ids, 2]
+        - terrain_height.unsqueeze(-1)
+    )
+    foot_lateral_speed = torch.linalg.vector_norm(
+        robot.data.body_lin_vel_w[:, asset_cfg.body_ids, :2],
+        dim=-1,
+    )
+
+    height_error = torch.square(target_height - foot_height)
+    return torch.sum(height_error * foot_lateral_speed, dim=1)
+
+
+def power_distribution(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize squared variance of mechanical power across joints."""
+    robot = env.scene[asset_cfg.name]
+    torque = robot.data.applied_torque[:, asset_cfg.joint_ids]
+    joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+    mechanical_power = torque * joint_vel
+    power_variance = torch.var(
+        mechanical_power,
+        dim=1,
+        unbiased=False,
+    )
+    return torch.square(power_variance)
+
+
+class ActionSmoothnessPenalty(ManagerTermBase):
+    """Penalize the second finite difference of consecutive actions."""
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.previous_previous_action = torch.zeros(
+            env.num_envs,
+            env.action_manager.total_action_dim,
+            device=env.device,
+        )
+
+    def reset(self, env_ids=None):
+        if env_ids is None:
+            self.previous_previous_action.zero_()
+        else:
+            self.previous_previous_action[env_ids] = 0.0
+
+    def __call__(self, env) -> torch.Tensor:
+        action = env.action_manager.action
+        previous_action = env.action_manager.prev_action
+
+        second_difference = (
+            action
+            - 2.0 * previous_action
+            + self.previous_previous_action
+        )
+        penalty = torch.sum(torch.square(second_difference), dim=1)
+
+        self.previous_previous_action.copy_(previous_action)
+        return penalty
 
 
 @configclass
@@ -66,8 +156,44 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = -0.2
         self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.dof_torques_l2.weight = -2.0e-5
         self.rewards.action_rate_l2.weight = -0.01
+
+        # DreamWaQ reward terms from the paper.
+        self.rewards.dof_torques_l2 = None
+        self.rewards.feet_air_time = None
+
+        self.rewards.joint_power = RewTerm(
+            func=joint_power,
+            weight=-2.0e-5,
+        )
+        self.rewards.body_height = RewTerm(
+            func=mdp.base_height_l2,
+            weight=-1.0,
+            params={
+                "target_height": 0.42,
+                "sensor_cfg": SceneEntityCfg("height_scanner"),
+            },
+        )
+        self.rewards.foot_clearance = RewTerm(
+            func=foot_clearance,
+            weight=-0.01,
+            params={
+                "target_height": 0.08,
+                "asset_cfg": SceneEntityCfg(
+                    "robot",
+                    body_names=".*_foot",
+                ),
+                "sensor_cfg": SceneEntityCfg("height_scanner"),
+            },
+        )
+        self.rewards.action_smoothness = RewTerm(
+            func=ActionSmoothnessPenalty,
+            weight=-0.01,
+        )
+        self.rewards.power_distribution = RewTerm(
+            func=power_distribution,
+            weight=-1.0e-5,
+        )
 
         # actor: remove exteroceptive observations
         self.observations.policy.height_scan = None
