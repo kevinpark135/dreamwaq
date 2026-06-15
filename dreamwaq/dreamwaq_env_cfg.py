@@ -190,10 +190,12 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
             func=ActionSmoothnessPenalty,
             weight=-0.01,
         )
-        self.rewards.power_distribution = RewTerm(
+        self.rewards.power_distribution = None
+
+        """ self.rewards.power_distribution = RewTerm(
             func=power_distribution,
             weight=-1.0e-5,
-        )
+        ) """
 
         # actor: remove exteroceptive observations
         self.observations.policy.height_scan = None
