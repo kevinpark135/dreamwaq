@@ -12,6 +12,60 @@ from rsl_rl.utils import check_nan
 
 from .dreamwaq_cenet import DreamWaQCENet, cenet_loss
 
+class RunningMeanStd(torch.nn.Module):
+    def __init__(self, shape, device, epsilon=1e-4, clip=10.0):
+        super().__init__()
+        self.clip = clip
+
+        self.register_buffer(
+            "mean",
+            torch.zeros(shape, device=device),
+        )
+        self.register_buffer(
+            "var",
+            torch.ones(shape, device=device),
+        )
+        self.register_buffer(
+            "count",
+            torch.tensor(epsilon, device=device),
+        )
+
+    @torch.no_grad()
+    def update(self, values):
+        values = values.reshape(-1, *self.mean.shape)
+
+        batch_mean = values.mean(dim=0)
+        batch_var = values.var(dim=0, unbiased=False)
+        batch_count = torch.tensor(
+            values.shape[0],
+            device=values.device,
+            dtype=self.count.dtype,
+        )
+
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+
+        new_mean = self.mean + delta * batch_count / total_count
+
+        old_m2 = self.var * self.count
+        batch_m2 = batch_var * batch_count
+        correction = (
+            delta.square()
+            * self.count
+            * batch_count
+            / total_count
+        )
+        new_var = (old_m2 + batch_m2 + correction) / total_count
+
+        self.mean.copy_(new_mean)
+        self.var.copy_(new_var.clamp_min(1e-6))
+        self.count.copy_(total_count)
+
+    def normalize(self, values):
+        normalized = (values - self.mean) / torch.sqrt(
+            self.var + 1e-8
+        )
+        return normalized.clamp(-self.clip, self.clip)
 
 class DreamWaQRunner(OnPolicyRunner):
     """OnPolicyRunner extended with CENet update step."""
@@ -44,12 +98,25 @@ class DreamWaQRunner(OnPolicyRunner):
         self.single_obs_dim = single_obs_dim
         self.obs_history_dim = obs_history_dim
         self.cenet_batch_size = 1024
+        self.cenet_obs_normalizer = RunningMeanStd(
+            shape=(self.single_obs_dim,),
+            device=self.device,
+        )
+
+    def _normalize_history(self, obs_history):
+        original_shape = obs_history.shape
+
+        normalized = self.cenet_obs_normalizer.normalize(
+            obs_history.reshape(-1, self.single_obs_dim)
+        )
+
+        return normalized.reshape(original_shape)
 
     def _add_cenet_features(self, obs):
         """Replace placeholder observations with CENet outputs."""
-        cenet_out = self.cenet(
-            self.base_env.obs_history.to(self.device)
-        )
+        obs_history = self.base_env.obs_history.to(self.device)
+        obs_history = self._normalize_history(obs_history)
+        cenet_out = self.cenet(obs_history)
 
         cenet_features = torch.cat(
             (cenet_out["v_hat"], cenet_out["z"]),
@@ -164,6 +231,16 @@ class DreamWaQRunner(OnPolicyRunner):
             num_valid_samples = obs_history_tensor.shape[0]
 
             if num_valid_samples > 0:
+                with torch.no_grad():
+                    self.cenet_obs_normalizer.update(next_obs_tensor)
+
+                obs_history_tensor = self._normalize_history(
+                    obs_history_tensor
+                )
+                next_obs_tensor = self.cenet_obs_normalizer.normalize(
+                    next_obs_tensor
+                )
+
                 loss_sums = {
                     "total": 0.0,
                     "velocity": 0.0,
@@ -276,6 +353,9 @@ class DreamWaQRunner(OnPolicyRunner):
         saved_dict["infos"] = infos
         saved_dict["cenet"] = self.cenet.state_dict()
         saved_dict["cenet_optimizer"] = self.cenet_optimizer.state_dict()
+        saved_dict["cenet_obs_normalizer"] = (
+            self.cenet_obs_normalizer.state_dict()
+        )
         torch.save(saved_dict, path)
         self.logger.save_model(path, self.current_learning_iteration)
 
@@ -287,6 +367,11 @@ class DreamWaQRunner(OnPolicyRunner):
             self.cenet.load_state_dict(loaded_dict["cenet"])
         if "cenet_optimizer" in loaded_dict:
             self.cenet_optimizer.load_state_dict(loaded_dict["cenet_optimizer"])
+        if "cenet_obs_normalizer" in loaded_dict:
+            self.cenet_obs_normalizer.load_state_dict(
+                loaded_dict["cenet_obs_normalizer"]
+            )
+
         if load_iteration:
             self.current_learning_iteration = loaded_dict["iter"]
         return loaded_dict.get("infos")
