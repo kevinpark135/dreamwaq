@@ -1,6 +1,9 @@
 """DreamWaQ custom environment with proprioceptive observation history buffer."""
 
 from __future__ import annotations
+from random import seed
+
+from requests import options
 
 import torch
 from isaaclab.envs import ManagerBasedRLEnv
@@ -51,13 +54,16 @@ class DreamWaQEnv(ManagerBasedRLEnv):
     def reset(self, seed=None, options=None):
         obs_dict, info = super().reset(seed=seed, options=options)
 
-        # reset된 env들만 버퍼 초기화
-        # (전체 reset이면 전부, partial reset이면 해당 env_ids만)
-        # ManagerBasedRLEnv는 전체 reset이라 전부 초기화
-        single_obs_dim = self.observation_manager.group_obs_dim["policy"][0]
-        init_obs = torch.zeros(self.num_envs, single_obs_dim, device=self.device)
-        for _ in range(self.history_length):
-            self.obs_history_buf.append(init_obs)
+        # episode_length_buf == 0인 env들만 reset된 것
+        reset_env_ids = (self.episode_length_buf == 0).nonzero(as_tuple=False).squeeze(-1)
+
+        if len(reset_env_ids) > 0:
+            single_obs_dim = self.observation_manager.group_obs_dim["policy"][0]
+            zeros = torch.zeros(len(reset_env_ids), single_obs_dim, device=self.device)
+
+            # reset된 env들만 해당 슬롯을 zeros로 덮어씀
+            for i in range(self.history_length):
+                self.obs_history_buf.buffer[reset_env_ids, i, :] = zeros
 
         return obs_dict, info
 
