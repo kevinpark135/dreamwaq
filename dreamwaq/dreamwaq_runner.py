@@ -43,6 +43,7 @@ class DreamWaQRunner(OnPolicyRunner):
 
         self.single_obs_dim = single_obs_dim
         self.obs_history_dim = obs_history_dim
+        self.cenet_batch_size = 1024
 
     def _add_cenet_features(self, obs):
         """Replace placeholder observations with CENet outputs."""
@@ -160,32 +161,82 @@ class DreamWaQRunner(OnPolicyRunner):
             next_obs_tensor = next_obs_tensor[valid_transition_tensor]
             base_lin_vel_tensor = base_lin_vel_tensor[valid_transition_tensor]
 
-            if obs_history_tensor.shape[0] > 0:
-                cenet_out = self.cenet(obs_history_tensor)
-                ce_loss = cenet_loss(
-                    cenet_out,
-                    target_base_lin_vel=base_lin_vel_tensor,
-                    target_next_obs=next_obs_tensor,
-                    beta=1.0,
+            num_valid_samples = obs_history_tensor.shape[0]
+
+            if num_valid_samples > 0:
+                loss_sums = {
+                    "total": 0.0,
+                    "velocity": 0.0,
+                    "reconstruction": 0.0,
+                    "kl": 0.0,
+                }
+
+                permutation = torch.randperm(
+                    num_valid_samples,
+                    device=self.device,
                 )
 
-                self.cenet_optimizer.zero_grad()
-                ce_loss["total_loss"].backward()
-                self.cenet_optimizer.step()
+                for start_idx in range(
+                    0,
+                    num_valid_samples,
+                    self.cenet_batch_size,
+                ):
+                    batch_indices = permutation[
+                        start_idx : start_idx + self.cenet_batch_size
+                    ]
 
-                loss_dict["CENet/total"] = ce_loss["total_loss"].item()
-                loss_dict["CENet/velocity"] = ce_loss["velocity_loss"].item()
-                loss_dict["CENet/reconstruction"] = ce_loss[
-                    "reconstruction_loss"
-                ].item()
-                loss_dict["CENet/kl"] = ce_loss["kl_loss"].item()
+                    batch_history = obs_history_tensor[batch_indices]
+                    batch_next_obs = next_obs_tensor[batch_indices]
+                    batch_base_lin_vel = base_lin_vel_tensor[batch_indices]
+
+                    cenet_out = self.cenet(batch_history)
+
+                    ce_loss = cenet_loss(
+                        cenet_out,
+                        target_base_lin_vel=batch_base_lin_vel,
+                        target_next_obs=batch_next_obs,
+                        beta=1.0,
+                    )
+
+                    self.cenet_optimizer.zero_grad(set_to_none=True)
+                    ce_loss["total_loss"].backward()
+                    self.cenet_optimizer.step()
+
+                    batch_size = batch_indices.shape[0]
+
+                    loss_sums["total"] += (
+                        ce_loss["total_loss"].item() * batch_size
+                    )
+                    loss_sums["velocity"] += (
+                        ce_loss["velocity_loss"].item() * batch_size
+                    )
+                    loss_sums["reconstruction"] += (
+                        ce_loss["reconstruction_loss"].item() * batch_size
+                    )
+                    loss_sums["kl"] += (
+                        ce_loss["kl_loss"].item() * batch_size
+                    )
+
+                loss_dict["CENet/total"] = (
+                    loss_sums["total"] / num_valid_samples
+                )
+                loss_dict["CENet/velocity"] = (
+                    loss_sums["velocity"] / num_valid_samples
+                )
+                loss_dict["CENet/reconstruction"] = (
+                    loss_sums["reconstruction"] / num_valid_samples
+                )
+                loss_dict["CENet/kl"] = (
+                    loss_sums["kl"] / num_valid_samples
+                )
+
             else:
                 loss_dict["CENet/total"] = 0.0
                 loss_dict["CENet/velocity"] = 0.0
                 loss_dict["CENet/reconstruction"] = 0.0
                 loss_dict["CENet/kl"] = 0.0
 
-            loss_dict["CENet/valid_samples"] = obs_history_tensor.shape[0]
+            loss_dict["CENet/valid_samples"] = num_valid_samples
 
             learn_time = time.time() - start
             self.current_learning_iteration = it
