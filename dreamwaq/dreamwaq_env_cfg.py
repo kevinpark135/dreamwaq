@@ -74,7 +74,7 @@ class DreamWaQDCMotor(DCMotor):
             low=self.cfg.min_delay,
             high=self.cfg.max_delay + 1,
             size=(num_envs,),
-            dtype=torch.long,
+            dtype=torch.int32,
             device=self._device,
         )
         for delay_buffer in (
@@ -299,7 +299,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         self.events.base_com.default.params["com_range"] = {
             "x": (-0.05, 0.05),
             "y": (-0.05, 0.05),
-            "z": (-0.05, 0.05),
+            "z": (-0.01, 0.01),
         }
 
         self.events.actuator_gains = EventTerm(
