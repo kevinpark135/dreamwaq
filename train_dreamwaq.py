@@ -81,7 +81,7 @@ def main(
             agent_cfg, installed_rsl_rl_version
         )
         agent_cfg.obs_groups = {
-            "actor": ["policy"],
+            "actor": ["policy", "cenet"],
             "critic": ["critic"],
         }
 

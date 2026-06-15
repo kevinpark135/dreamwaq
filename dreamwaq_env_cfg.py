@@ -1,5 +1,6 @@
 """DreamWaQ environment configuration for four-legged locomotion with proprioceptive history and privileged critic observations."""
 
+import torch
 from isaaclab.utils.configclass import configclass
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -8,6 +9,20 @@ from isaaclab.managers import SceneEntityCfg
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from .rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
+
+def empty_cenet_features(env) -> torch.Tensor:
+    return torch.zeros((env.num_envs, 19), device=env.device)
+
+
+@configclass
+class DreamWaQCENetObsCfg(ObsGroup):
+    """Placeholder for CENet velocity and latent context."""
+
+    features = ObsTerm(func=empty_cenet_features)
+
+    def __post_init__(self):
+        self.enable_corruption = False
+        self.concatenate_terms = True
 
 @configclass
 class DreamWaQCriticObsCfg(ObsGroup):
@@ -60,6 +75,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
 
         # critic: privileged observation
         self.observations.critic = DreamWaQCriticObsCfg()
+        self.observations.cenet = DreamWaQCENetObsCfg()
 
 
 @configclass
@@ -70,6 +86,7 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
         self.observations.policy.enable_corruption = False
         self.observations.policy.height_scan = None
         self.observations.policy.base_lin_vel = None
+        self.observations.cenet = DreamWaQCENetObsCfg()
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None

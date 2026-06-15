@@ -44,6 +44,27 @@ class DreamWaQRunner(OnPolicyRunner):
         self.single_obs_dim = single_obs_dim
         self.obs_history_dim = obs_history_dim
 
+    def _add_cenet_features(self, obs):
+        """Replace placeholder observations with CENet outputs."""
+        cenet_out = self.cenet(
+            self.base_env.obs_history.to(self.device)
+        )
+
+        cenet_features = torch.cat(
+            (cenet_out["v_hat"], cenet_out["z"]),
+            dim=-1,
+        )
+
+        if obs["cenet"].shape != cenet_features.shape:
+            raise ValueError(
+                "CENet observation shape mismatch: "
+                f"placeholder={tuple(obs['cenet'].shape)}, "
+                f"features={tuple(cenet_features.shape)}"
+            )
+
+        obs["cenet"] = cenet_features
+        return obs
+
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         """Learn with CENet update after each PPO update."""
         if init_at_random_ep_len:
@@ -55,6 +76,9 @@ class DreamWaQRunner(OnPolicyRunner):
         obs = self.env.get_observations().to(self.device)
         self.alg.train_mode()
         self.cenet.train()
+
+        with torch.inference_mode():
+            obs = self._add_cenet_features(obs)
 
         if self.is_distributed:
             raise NotImplementedError(
@@ -68,6 +92,9 @@ class DreamWaQRunner(OnPolicyRunner):
 
         for it in range(start_it, total_it):
             start = time.time()
+
+            with torch.inference_mode():
+                obs = self._add_cenet_features(obs)
 
             obs_history_buf = []
             next_obs_buf = []
@@ -91,6 +118,7 @@ class DreamWaQRunner(OnPolicyRunner):
 
                     next_obs_buf.append(obs["policy"].clone())
                     valid_transition_buf.append(~dones.bool())
+                    obs = self._add_cenet_features(obs)
 
                     obs, rewards, dones = (
                         obs.to(self.device),
