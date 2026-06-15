@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 
 import torch
@@ -113,6 +114,94 @@ class DreamWaQRunner(OnPolicyRunner):
             dtype=torch.bool,
             device=self.device,
         )
+        distribution_cfg = train_cfg.get("actor", {}).get("distribution_cfg", {})
+        self._policy_std_is_log = distribution_cfg.get("std_type") == "log"
+        self._policy_std_min = 1.0e-3
+        self._policy_std_max = 2.0
+        self._patch_actor_std_safety()
+
+    @torch.no_grad()
+    def _sanitize_optimizer_state(self):
+        """Remove invalid values from PPO optimizer state."""
+        optimizer = getattr(self.alg, "optimizer", None)
+        if optimizer is None:
+            return
+
+        for state in optimizer.state.values():
+            for value in state.values():
+                if torch.is_tensor(value):
+                    value.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+
+    @torch.no_grad()
+    def _sanitize_policy_std(self):
+        """Keep Gaussian std parameters valid before actor sampling."""
+        actors = [
+            getattr(self.alg, "actor", None),
+            getattr(self.alg, "actor_critic", None),
+            self.alg.get_policy() if hasattr(self.alg, "get_policy") else None,
+        ]
+
+        seen = set()
+        for actor in actors:
+            if actor is None or id(actor) in seen:
+                continue
+            seen.add(id(actor))
+
+            for name, param in actor.named_parameters():
+                if "std" not in name.lower():
+                    continue
+
+                param.data.nan_to_num_(nan=0.0, posinf=0.0, neginf=0.0)
+                if self._policy_std_is_log:
+                    param.data.clamp_(
+                        math.log(self._policy_std_min),
+                        math.log(self._policy_std_max),
+                    )
+                else:
+                    param.data.clamp_(
+                        self._policy_std_min,
+                        self._policy_std_max,
+                    )
+
+    @torch.no_grad()
+    def _sanitize_observations(self, obs):
+        """Remove invalid values from observation tensors before PPO sees them."""
+        if hasattr(obs, "keys"):
+            for key in obs.keys():
+                value = obs[key]
+                if torch.is_tensor(value):
+                    obs[key] = torch.nan_to_num(
+                        value,
+                        nan=0.0,
+                        posinf=1.0e6,
+                        neginf=-1.0e6,
+                    )
+        elif torch.is_tensor(obs):
+            obs = torch.nan_to_num(
+                obs,
+                nan=0.0,
+                posinf=1.0e6,
+                neginf=-1.0e6,
+            )
+        return obs
+
+    def _patch_actor_std_safety(self):
+        """Clamp actor std before every actor forward call."""
+        actor = getattr(self.alg, "actor", None)
+        if actor is None:
+            return
+        if getattr(actor, "_dreamwaq_std_safety_patched", False):
+            return
+
+        original_forward = actor.forward
+
+        def safe_forward(*args, **kwargs):
+            self._sanitize_policy_std()
+            self._sanitize_optimizer_state()
+            return original_forward(*args, **kwargs)
+
+        actor.forward = safe_forward
+        actor._dreamwaq_std_safety_patched = True
 
     def _normalize_history(self, obs_history):
         original_shape = obs_history.shape
@@ -139,14 +228,31 @@ class DreamWaQRunner(OnPolicyRunner):
     def _add_cenet_features(self, obs, use_adaboot=False):
         """Add CENet features, optionally applying AdaBoot."""
         obs_history = self.base_env.obs_history.to(self.device)
+        obs_history = torch.nan_to_num(
+            obs_history,
+            nan=0.0,
+            posinf=1.0e6,
+            neginf=-1.0e6,
+        )
         obs_history = self._normalize_history(obs_history)
         cenet_out = self.cenet(obs_history)
 
-        estimated_velocity = cenet_out["v_hat"]
+        estimated_velocity = torch.nan_to_num(
+            cenet_out["v_hat"],
+            nan=0.0,
+            posinf=1.0e6,
+            neginf=-1.0e6,
+        )
 
         if use_adaboot:
             ground_truth_velocity = (
                 self.base_env.scene["robot"].data.root_lin_vel_b.to(self.device)
+            )
+            ground_truth_velocity = torch.nan_to_num(
+                ground_truth_velocity,
+                nan=0.0,
+                posinf=1.0e6,
+                neginf=-1.0e6,
             )
             bootstrap_mask = torch.rand(
                 estimated_velocity.shape[0],
@@ -162,7 +268,15 @@ class DreamWaQRunner(OnPolicyRunner):
             actor_velocity = estimated_velocity
 
         cenet_features = torch.cat(
-            (actor_velocity, cenet_out["z"]),
+            (
+                actor_velocity,
+                torch.nan_to_num(
+                    cenet_out["z"],
+                    nan=0.0,
+                    posinf=1.0e6,
+                    neginf=-1.0e6,
+                ),
+            ),
             dim=-1,
         )
 
@@ -174,7 +288,7 @@ class DreamWaQRunner(OnPolicyRunner):
             )
 
         obs["cenet"] = cenet_features
-        return obs
+        return self._sanitize_observations(obs)
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         """Learn with CENet update after each PPO update."""
@@ -191,6 +305,7 @@ class DreamWaQRunner(OnPolicyRunner):
 
         with torch.inference_mode():
             obs = self._add_cenet_features(obs, use_adaboot=True)
+            obs = self._sanitize_observations(obs)
 
         if self.is_distributed:
             raise NotImplementedError(
@@ -207,6 +322,7 @@ class DreamWaQRunner(OnPolicyRunner):
 
             with torch.inference_mode():
                 obs = self._add_cenet_features(obs, use_adaboot=True)
+                obs = self._sanitize_observations(obs)
 
             obs_history_buf = []
             next_obs_buf = []
@@ -222,6 +338,9 @@ class DreamWaQRunner(OnPolicyRunner):
                         self.base_env.scene["robot"].data.root_lin_vel_b.clone()
                     )
 
+                    self._sanitize_policy_std()
+                    self._sanitize_optimizer_state()
+                    obs = self._sanitize_observations(obs)
                     actions = self.alg.act(obs)
                     obs, rewards, dones, extras = self.env.step(
                         actions.to(self.env.device)
@@ -251,6 +370,7 @@ class DreamWaQRunner(OnPolicyRunner):
                         obs,
                         use_adaboot=True,
                     )
+                    obs = self._sanitize_observations(obs)
 
                     obs, rewards, dones = (
                         obs.to(self.device),
@@ -276,9 +396,14 @@ class DreamWaQRunner(OnPolicyRunner):
                 stop = time.time()
                 collect_time = stop - start
                 start = stop
+                obs = self._sanitize_observations(obs)
                 self.alg.compute_returns(obs)
 
+            self._sanitize_policy_std()
+            self._sanitize_optimizer_state()
             loss_dict = self.alg.update()
+            self._sanitize_policy_std()
+            self._sanitize_optimizer_state()
 
             obs_history_tensor = torch.stack(obs_history_buf).reshape(
                 -1, self.obs_history_dim
@@ -346,6 +471,10 @@ class DreamWaQRunner(OnPolicyRunner):
 
                     self.cenet_optimizer.zero_grad(set_to_none=True)
                     ce_loss["total_loss"].backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        self.cenet.parameters(),
+                        max_norm=1.0,
+                    )
                     self.cenet_optimizer.step()
 
                     batch_size = batch_indices.shape[0]

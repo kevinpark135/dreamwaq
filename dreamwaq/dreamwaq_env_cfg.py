@@ -163,12 +163,9 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
 
         self.events.add_base_mass.params["recompute_inertia"] = False
 
-        self.events.base_com.default.params["asset_cfg"].body_names = "trunk"
-        self.events.base_com.default.params["com_range"] = {
-            "x": (-0.05, 0.05),
-            "y": (-0.05, 0.05),
-            "z": (-0.05, 0.05),
-        }
+        # Disable CoM randomization for now. On this Isaac Sim/PhysX setup it
+        # repeatedly triggers setCMassLocalPose invalid-parameter errors.
+        self.events.base_com = None
 
         self.events.actuator_gains = EventTerm(
             func=mdp.randomize_actuator_gains,

@@ -70,6 +70,7 @@ class DreamWaQCENet(nn.Module):
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         """Sample z using the VAE reparameterization trick."""
+        logvar = logvar.clamp(-10.0, 10.0)
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
@@ -80,7 +81,7 @@ class DreamWaQCENet(nn.Module):
         v_hat = self.velocity_head(feature)
 
         mu = self.mu_head(feature)
-        logvar = self.logvar_head(feature)
+        logvar = self.logvar_head(feature).clamp(-10.0, 10.0)
         if self.training:
             z = self.reparameterize(mu, logvar)
         else:
@@ -89,11 +90,11 @@ class DreamWaQCENet(nn.Module):
         obs_recon = self.decoder(z)
 
         return {
-            "v_hat": v_hat,
-            "z": z,
+            "v_hat": torch.nan_to_num(v_hat, nan=0.0, posinf=1.0e6, neginf=-1.0e6),
+            "z": torch.nan_to_num(z, nan=0.0, posinf=1.0e6, neginf=-1.0e6),
             "mu": mu,
             "logvar": logvar,
-            "obs_recon": obs_recon,
+            "obs_recon": torch.nan_to_num(obs_recon, nan=0.0, posinf=1.0e6, neginf=-1.0e6),
         }
 
 
@@ -112,7 +113,20 @@ def cenet_loss(
     v_hat = outputs["v_hat"]
     obs_recon = outputs["obs_recon"]
     mu = outputs["mu"]
-    logvar = outputs["logvar"]
+    logvar = outputs["logvar"].clamp(-10.0, 10.0)
+
+    target_base_lin_vel = torch.nan_to_num(
+        target_base_lin_vel,
+        nan=0.0,
+        posinf=1.0e6,
+        neginf=-1.0e6,
+    )
+    target_next_obs = torch.nan_to_num(
+        target_next_obs,
+        nan=0.0,
+        posinf=1.0e6,
+        neginf=-1.0e6,
+    )
 
     velocity_loss = F.mse_loss(v_hat, target_base_lin_vel)
     reconstruction_loss = F.mse_loss(obs_recon, target_next_obs)

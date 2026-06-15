@@ -121,9 +121,14 @@ def main(
             clip_actions=agent_cfg.clip_actions,
         )
 
+        train_cfg = agent_cfg.to_dict()
+        distribution_cfg = train_cfg.get("actor", {}).get("distribution_cfg")
+        if isinstance(distribution_cfg, dict):
+            distribution_cfg.pop("std_range", None)
+
         runner = runner_class(
             env,
-            agent_cfg.to_dict(),
+            train_cfg,
             log_dir=None,
             device=agent_cfg.device,
         )
