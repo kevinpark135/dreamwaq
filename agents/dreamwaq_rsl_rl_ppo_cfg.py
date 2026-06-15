@@ -10,7 +10,4 @@ class DreamWaQA1RoughPPORunnerCfg(UnitreeA1RoughPPORunnerCfg):
         self.experiment_name = "dreamwaq_a1_rough"
         self.max_iterations = 1000
 
-        # Optimize log(std), so the Gaussian standard deviation always remains
-        # positive during long PPO runs.
         self.actor.distribution_cfg.std_type = "log"
-        self.actor.distribution_cfg.std_range = (1.0e-3, 2.0)

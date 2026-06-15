@@ -113,7 +113,7 @@ def main(
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
         runner = runner_class(
             env,
-            agent_cfg.to_dict(),
+            train_cfg,
             log_dir=log_dir,
             device=agent_cfg.device,
         )
