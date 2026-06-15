@@ -75,7 +75,7 @@ gym.register(
     entry_point=f"{__name__}.dreamwaq_env:DreamWaQEnv",
     disable_env_checker=True,
     kwargs={
-         "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg_PLAY",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.dreamwaq_rsl_rl_ppo_cfg:DreamWaQA1RoughPPORunnerCfg",
         "dreamwaq_runner_entry_point": f"{__name__}.dreamwaq_runner:DreamWaQRunner",
     },

@@ -87,6 +87,7 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
         self.observations.policy.height_scan = None
         self.observations.policy.base_lin_vel = None
         self.observations.cenet = DreamWaQCENetObsCfg()
+        self.observations.critic = DreamWaQCriticObsCfg()
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None
