@@ -61,22 +61,22 @@ gym.register(
 
 gym.register(
     id="Isaac-DreamWaQ-A1-v0",
-    entry_point=f"{__name__}.dreamwaq_env:DreamWaQEnv",
+    entry_point=f"{__name__}.dreamwaq.dreamwaq_env:DreamWaQEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.dreamwaq.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg",
+        "dreamwaq_runner_entry_point": f"{__name__}.dreamwaq.dreamwaq_runner:DreamWaQRunner",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.dreamwaq_rsl_rl_ppo_cfg:DreamWaQA1RoughPPORunnerCfg",
-        "dreamwaq_runner_entry_point": f"{__name__}.dreamwaq_runner:DreamWaQRunner",
     },
 )
 
 gym.register(
     id="Isaac-DreamWaQ-A1-Play-v0",
-    entry_point=f"{__name__}.dreamwaq_env:DreamWaQEnv",
+    entry_point=f"{__name__}.dreamwaq.dreamwaq_env:DreamWaQEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.dreamwaq.dreamwaq_env_cfg:DreamWaQA1RoughEnvCfg_PLAY",
+        "dreamwaq_runner_entry_point": f"{__name__}.dreamwaq.dreamwaq_runner:DreamWaQRunner",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.dreamwaq_rsl_rl_ppo_cfg:DreamWaQA1RoughPPORunnerCfg",
-        "dreamwaq_runner_entry_point": f"{__name__}.dreamwaq_runner:DreamWaQRunner",
     },
 )

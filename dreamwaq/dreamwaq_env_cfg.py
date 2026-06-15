@@ -8,7 +8,7 @@ from isaaclab.managers import SceneEntityCfg
 
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
-from .rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
+from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 
 def empty_cenet_features(env) -> torch.Tensor:
     return torch.zeros((env.num_envs, 19), device=env.device)
