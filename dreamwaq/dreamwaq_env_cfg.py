@@ -5,6 +5,7 @@ from isaaclab.utils.configclass import configclass
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers.manager_base import ManagerTermBase
 
@@ -149,6 +150,34 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
+        # DreamWaQ domain randomization ranges from the paper.
+        self.events.physics_material.params["static_friction_range"] = (0.2, 1.25)
+        self.events.physics_material.params["dynamic_friction_range"] = (0.2, 1.25)
+        self.events.physics_material.params["restitution_range"] = (0.0, 0.0)
+        self.events.physics_material.params["num_buckets"] = 64
+        self.events.physics_material.params["make_consistent"] = True
+
+        self.events.add_base_mass.params["mass_distribution_params"] = (-1.0, 2.0)
+        self.events.add_base_mass.params["operation"] = "add"
+
+        self.events.base_com.default.params["com_range"] = {
+            "x": (-0.05, 0.05),
+            "y": (-0.05, 0.05),
+            "z": (-0.05, 0.05),
+        }
+
+        self.events.actuator_gains = EventTerm(
+            func=mdp.randomize_actuator_gains,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "stiffness_distribution_params": (0.9, 1.1),
+                "damping_distribution_params": (0.9, 1.1),
+                "operation": "scale",
+                "distribution": "uniform",
+            },
+        )
+
         # rewards
         self.rewards.track_lin_vel_xy_exp.weight = 1.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
@@ -219,3 +248,7 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None
+        self.events.physics_material = None
+        self.events.add_base_mass = None
+        self.events.base_com = None
+        self.events.actuator_gains = None
