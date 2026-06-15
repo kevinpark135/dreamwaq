@@ -81,7 +81,10 @@ class DreamWaQCENet(nn.Module):
 
         mu = self.mu_head(feature)
         logvar = self.logvar_head(feature)
-        z = self.reparameterize(mu, logvar)
+        if self.training:
+            z = self.reparameterize(mu, logvar)
+        else:
+            z = mu
 
         obs_recon = self.decoder(z)
 
