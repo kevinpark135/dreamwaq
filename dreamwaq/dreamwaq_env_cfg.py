@@ -1,14 +1,7 @@
 """DreamWaQ environment configuration for four-legged locomotion with proprioceptive history and privileged critic observations."""
 
-from __future__ import annotations
-
-from collections.abc import Sequence
-
 import torch
-from isaaclab.actuators import DCMotor, DCMotorCfg
 from isaaclab.utils.configclass import configclass
-from isaaclab.utils import DelayBuffer
-from isaaclab.utils.types import ArticulationActions
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -19,117 +12,6 @@ from isaaclab.managers.manager_base import ManagerTermBase
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
-
-
-class DreamWaQDCMotor(DCMotor):
-    """A1 DC motor with per-environment command delay and strength randomization."""
-
-    def __init__(self, cfg, *args, **kwargs):
-        super().__init__(cfg, *args, **kwargs)
-
-        self.positions_delay_buffer = DelayBuffer(
-            cfg.max_delay,
-            self._num_envs,
-            device=self._device,
-        )
-        self.velocities_delay_buffer = DelayBuffer(
-            cfg.max_delay,
-            self._num_envs,
-            device=self._device,
-        )
-        self.efforts_delay_buffer = DelayBuffer(
-            cfg.max_delay,
-            self._num_envs,
-            device=self._device,
-        )
-
-        self._all_indices = torch.arange(
-            self._num_envs,
-            dtype=torch.long,
-            device=self._device,
-        )
-        self.motor_strength = torch.ones(
-            self._num_envs,
-            1,
-            device=self._device,
-        )
-
-        self._default_effort_limit = self.effort_limit.clone()
-        self._default_saturation_effort = torch.full_like(
-            self.effort_limit,
-            float(cfg.saturation_effort),
-        )
-        self._saturation_effort = self._default_saturation_effort.clone()
-
-    def reset(self, env_ids: Sequence[int] | None):
-        if env_ids is None:
-            env_ids = self._all_indices
-        elif isinstance(env_ids, slice):
-            env_ids = self._all_indices[env_ids]
-
-        super().reset(env_ids)
-        num_envs = len(env_ids)
-
-        time_lags = torch.randint(
-            low=self.cfg.min_delay,
-            high=self.cfg.max_delay + 1,
-            size=(num_envs,),
-            dtype=torch.int32,
-            device=self._device,
-        )
-        for delay_buffer in (
-            self.positions_delay_buffer,
-            self.velocities_delay_buffer,
-            self.efforts_delay_buffer,
-        ):
-            delay_buffer.set_time_lag(time_lags, env_ids)
-            delay_buffer.reset(env_ids)
-
-        strength = torch.empty(
-            num_envs,
-            1,
-            device=self._device,
-        ).uniform_(*self.cfg.motor_strength_range)
-        self.motor_strength[env_ids] = strength
-
-        self.effort_limit[env_ids] = (
-            self._default_effort_limit[env_ids] * strength
-        )
-        self._saturation_effort[env_ids] = (
-            self._default_saturation_effort[env_ids] * strength
-        )
-        self._vel_at_effort_lim[env_ids] = self.velocity_limit[env_ids] * (
-            1.0
-            + self.effort_limit[env_ids]
-            / self._saturation_effort[env_ids]
-        )
-
-    def compute(
-        self,
-        control_action: ArticulationActions,
-        joint_pos: torch.Tensor,
-        joint_vel: torch.Tensor,
-    ) -> ArticulationActions:
-        control_action.joint_positions = self.positions_delay_buffer.compute(
-            control_action.joint_positions
-        )
-        control_action.joint_velocities = self.velocities_delay_buffer.compute(
-            control_action.joint_velocities
-        )
-        control_action.joint_efforts = self.efforts_delay_buffer.compute(
-            control_action.joint_efforts
-        )
-        return super().compute(control_action, joint_pos, joint_vel)
-
-
-@configclass
-class DreamWaQDCMotorCfg(DCMotorCfg):
-    """Configuration for the DreamWaQ randomized A1 motor."""
-
-    class_type: type = DreamWaQDCMotor
-    min_delay: int = 0
-    max_delay: int = 0
-    motor_strength_range: tuple[float, float] = (0.9, 1.1)
 
 
 def empty_cenet_features(env) -> torch.Tensor:
@@ -268,24 +150,6 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        max_delay_steps = round(0.015 / self.sim.dt)
-        self.scene.robot.actuators["base_legs"] = DreamWaQDCMotorCfg(
-            joint_names_expr=[
-                ".*_hip_joint",
-                ".*_thigh_joint",
-                ".*_calf_joint",
-            ],
-            effort_limit=33.5,
-            saturation_effort=33.5,
-            velocity_limit=21.0,
-            stiffness=25.0,
-            damping=0.5,
-            friction=0.0,
-            min_delay=0,
-            max_delay=max_delay_steps,
-            motor_strength_range=(0.9, 1.1),
-        )
-
         # DreamWaQ domain randomization ranges from the paper.
         self.events.physics_material.params["static_friction_range"] = (0.2, 1.25)
         self.events.physics_material.params["dynamic_friction_range"] = (0.2, 1.25)
@@ -299,7 +163,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         self.events.base_com.default.params["com_range"] = {
             "x": (-0.05, 0.05),
             "y": (-0.05, 0.05),
-            "z": (-0.01, 0.01),
+            "z": (-0.05, 0.05),
         }
 
         self.events.actuator_gains = EventTerm(
