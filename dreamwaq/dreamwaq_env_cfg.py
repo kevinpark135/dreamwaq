@@ -157,9 +157,13 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         self.events.physics_material.params["num_buckets"] = 64
         self.events.physics_material.params["make_consistent"] = True
 
+        self.events.add_base_mass.params["asset_cfg"].body_names = "trunk"
         self.events.add_base_mass.params["mass_distribution_params"] = (-1.0, 2.0)
         self.events.add_base_mass.params["operation"] = "add"
 
+        self.events.add_base_mass.params["recompute_inertia"] = False
+
+        self.events.base_com.default.params["asset_cfg"].body_names = "trunk"
         self.events.base_com.default.params["com_range"] = {
             "x": (-0.05, 0.05),
             "y": (-0.05, 0.05),

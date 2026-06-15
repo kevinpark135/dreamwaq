@@ -109,8 +109,18 @@ def main(
         print(f"[INFO] Logging experiment in: {log_dir}")
         print(f"[INFO] DreamWaQ runner entry point: {runner_entry_point}")
 
+        train_cfg = agent_cfg.to_dict()
+
+        distribution_cfg = train_cfg.get("actor", {}).get("distribution_cfg")
+        if isinstance(distribution_cfg, dict):
+            distribution_cfg.pop("std_range", None)
+
         env = gym.make(args_cli.task, cfg=env_cfg)
-        env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+        env = RslRlVecEnvWrapper(
+            env,
+            clip_actions=agent_cfg.clip_actions,
+        )
+
         runner = runner_class(
             env,
             train_cfg,
