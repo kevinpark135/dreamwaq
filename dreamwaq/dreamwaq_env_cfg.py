@@ -150,6 +150,13 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
+        # Increase PhysX GPU contact buffers for rough terrain training.
+        self.sim.physx.gpu_found_lost_pairs_capacity = 2**24
+        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 2**29
+        self.sim.physx.gpu_total_aggregate_pairs_capacity = 2**23
+        self.sim.physx.gpu_max_rigid_contact_count = 2**23
+        self.sim.physx.gpu_max_rigid_patch_count = 2**22
+
         # DreamWaQ domain randomization ranges from the paper.
         self.events.physics_material.params["static_friction_range"] = (0.2, 1.25)
         self.events.physics_material.params["dynamic_friction_range"] = (0.2, 1.25)
