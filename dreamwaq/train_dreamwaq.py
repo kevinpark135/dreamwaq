@@ -55,6 +55,12 @@ parser.add_argument(
     help="Number of learning iterations.",
 )
 parser.add_argument("--seed", type=int, default=None, help="Training seed.")
+parser.add_argument(
+    "--checkpoint",
+    type=str,
+    default=None,
+    help="Path to a DreamWaQ checkpoint to resume from.",
+)
 add_launcher_args(parser)
 args_cli, remaining_args = setup_preset_cli(parser)
 
@@ -71,11 +77,6 @@ def main(
     with launch_simulation(env_cfg, args_cli):
         if args_cli.num_envs is not None:
             env_cfg.scene.num_envs = args_cli.num_envs
-            if args_cli.num_envs > env_cfg.scene.num_envs:
-                print(
-                    f"[INFO] Capping num_envs from {args_cli.num_envs} "
-                    f"to {env_cfg.scene.num_envs} for PhysX stability."
-                )
         if args_cli.max_iterations is not None:
             agent_cfg.max_iterations = args_cli.max_iterations
         if args_cli.seed is not None:
@@ -139,6 +140,21 @@ def main(
         )
         print(f"[INFO] CENet: {runner.cenet.__class__.__name__}")
 
+        if args_cli.checkpoint is not None:
+            checkpoint_path = os.path.abspath(
+                os.path.expanduser(args_cli.checkpoint)
+            )
+            if not os.path.isfile(checkpoint_path):
+                raise FileNotFoundError(
+                    f"Checkpoint does not exist: {checkpoint_path}"
+                )
+            print(f"[INFO] Loading checkpoint: {checkpoint_path}")
+            runner.load(checkpoint_path, map_location=agent_cfg.device)
+            print(
+                "[INFO] Resuming from iteration: "
+                f"{runner.current_learning_iteration}"
+            )
+
         dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
         dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
@@ -146,7 +162,7 @@ def main(
         try:
             runner.learn(
                 num_learning_iterations=agent_cfg.max_iterations,
-                init_at_random_ep_len=True,
+                init_at_random_ep_len=args_cli.checkpoint is None,
             )
             print(f"[INFO] Training time: {time.time() - start_time:.2f} seconds")
         finally:
