@@ -271,7 +271,9 @@ class DreamWaQRunner(OnPolicyRunner):
             (
                 actor_velocity,
                 torch.nan_to_num(
-                    cenet_out["z"],
+                    # Use the deterministic context for the policy. The VAE
+                    # sample is still used when training CENet below.
+                    cenet_out["mu"],
                     nan=0.0,
                     posinf=1.0e6,
                     neginf=-1.0e6,
