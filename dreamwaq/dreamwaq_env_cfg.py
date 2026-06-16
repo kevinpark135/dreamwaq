@@ -175,7 +175,6 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.scene.num_envs = min(self.scene.num_envs, 1024)
         configure_physx_gpu_capacity(self.sim.physics)
 
         # DreamWaQ domain randomization ranges from the paper.
