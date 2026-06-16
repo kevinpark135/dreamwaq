@@ -8,6 +8,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers.manager_base import ManagerTermBase
+from isaaclab.sim import PhysxCfg
 
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
@@ -151,6 +152,9 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         super().__post_init__()
 
         # Increase PhysX GPU contact buffers for rough terrain training.
+        if not hasattr(self.sim, "physx") or self.sim.physx is None:
+            self.sim.physx = PhysxCfg()
+
         self.sim.physx.gpu_found_lost_pairs_capacity = 2**24
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 2**29
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 2**23
