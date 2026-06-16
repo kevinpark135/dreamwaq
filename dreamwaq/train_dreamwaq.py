@@ -70,7 +70,12 @@ def main(
     """Create the environment and train it with DreamWaQRunner."""
     with launch_simulation(env_cfg, args_cli):
         if args_cli.num_envs is not None:
-            env_cfg.scene.num_envs = args_cli.num_envs
+            env_cfg.scene.num_envs = min(args_cli.num_envs, 1024)
+            if args_cli.num_envs > env_cfg.scene.num_envs:
+                print(
+                    f"[INFO] Capping num_envs from {args_cli.num_envs} "
+                    f"to {env_cfg.scene.num_envs} for PhysX stability."
+                )
         if args_cli.max_iterations is not None:
             agent_cfg.max_iterations = args_cli.max_iterations
         if args_cli.seed is not None:

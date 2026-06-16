@@ -14,6 +14,31 @@ import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 
 
+def configure_physx_gpu_capacity(physics_cfg) -> None:
+    """Set moderate PhysX GPU buffers for contact-heavy rough-terrain training."""
+    physx_cfgs = [physics_cfg]
+    for preset_name in ("default", "physx"):
+        if hasattr(physics_cfg, preset_name):
+            physx_cfgs.append(getattr(physics_cfg, preset_name))
+
+    for cfg in physx_cfgs:
+        if not hasattr(cfg, "gpu_found_lost_aggregate_pairs_capacity"):
+            continue
+
+        cfg.gpu_found_lost_pairs_capacity = max(
+            cfg.gpu_found_lost_pairs_capacity,
+            2**24,
+        )
+        cfg.gpu_found_lost_aggregate_pairs_capacity = max(
+            cfg.gpu_found_lost_aggregate_pairs_capacity,
+            2**26,
+        )
+        cfg.gpu_total_aggregate_pairs_capacity = max(
+            cfg.gpu_total_aggregate_pairs_capacity,
+            2**22,
+        )
+
+
 def empty_cenet_features(env) -> torch.Tensor:
     return torch.zeros((env.num_envs, 19), device=env.device)
 
@@ -149,6 +174,9 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     
     def __post_init__(self):
         super().__post_init__()
+
+        self.scene.num_envs = min(self.scene.num_envs, 1024)
+        configure_physx_gpu_capacity(self.sim.physics)
 
         # DreamWaQ domain randomization ranges from the paper.
         self.events.physics_material.params["static_friction_range"] = (0.2, 1.25)
