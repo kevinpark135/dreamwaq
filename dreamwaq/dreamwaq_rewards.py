@@ -23,6 +23,10 @@ from isaaclab.managers.manager_base import ManagerTermBase
 _MAX_ABS_TORQUE = 120.0
 _MAX_ABS_JOINT_VEL = 80.0
 _MAX_FOOT_SPEED = 5.0
+_MAX_ABS_BASE_LIN_VEL = 20.0
+_MAX_ABS_BASE_ANG_VEL = 20.0
+_MAX_ABS_JOINT_ACC = 500.0
+_MAX_ACTION_RATE_REWARD = 100.0
 _MAX_HEIGHT_ERROR_SQ = 1.0
 _MAX_JOINT_POWER_REWARD = 5_000.0
 _MAX_FOOT_CLEARANCE_REWARD = 20.0
@@ -66,6 +70,108 @@ def _mean_terrain_height_from_scanner(
         fallback_height,
     )
     return _finite(terrain_height)
+
+
+def _command(env, command_name: str) -> torch.Tensor:
+    """Read a finite command tensor from Isaac Lab's command manager."""
+    return _finite(env.command_manager.get_command(command_name))
+
+
+def track_lin_vel_xy_exp(
+    env,
+    command_name: str,
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: exp(-4 * ||v_xy_cmd - v_xy||^2).
+
+    Isaac Lab exposes the coefficient as exp(-error / std^2).  Passing
+    std=0.5 gives the paper's exp(-4 * error).
+    """
+    robot = env.scene[asset_cfg.name]
+    command = _command(env, command_name)[:, :2]
+    lin_vel_xy = _finite(
+        robot.data.root_lin_vel_b[:, :2],
+        clamp_abs=_MAX_ABS_BASE_LIN_VEL,
+    )
+    error = torch.sum(torch.square(command - lin_vel_xy), dim=1)
+    std_sq = max(float(std) ** 2, 1.0e-6)
+    return torch.exp(-error / std_sq)
+
+
+def track_ang_vel_z_exp(
+    env,
+    command_name: str,
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: exp(-4 * (omega_yaw_cmd - omega_yaw)^2)."""
+    robot = env.scene[asset_cfg.name]
+    command = _command(env, command_name)[:, 2]
+    yaw_rate = _finite(
+        robot.data.root_ang_vel_b[:, 2],
+        clamp_abs=_MAX_ABS_BASE_ANG_VEL,
+    )
+    error = torch.square(command - yaw_rate)
+    std_sq = max(float(std) ** 2, 1.0e-6)
+    return torch.exp(-error / std_sq)
+
+
+def lin_vel_z_l2(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: vertical body velocity squared."""
+    robot = env.scene[asset_cfg.name]
+    lin_vel_z = _finite(
+        robot.data.root_lin_vel_b[:, 2],
+        clamp_abs=_MAX_ABS_BASE_LIN_VEL,
+    )
+    return torch.square(lin_vel_z)
+
+
+def ang_vel_xy_l2(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: roll/pitch angular velocity squared."""
+    robot = env.scene[asset_cfg.name]
+    ang_vel_xy = _finite(
+        robot.data.root_ang_vel_b[:, :2],
+        clamp_abs=_MAX_ABS_BASE_ANG_VEL,
+    )
+    return torch.sum(torch.square(ang_vel_xy), dim=1)
+
+
+def orientation_l2(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: projected gravity xy norm squared."""
+    robot = env.scene[asset_cfg.name]
+    projected_gravity = _finite(robot.data.projected_gravity_b)
+    return torch.sum(torch.square(projected_gravity[:, :2]), dim=1)
+
+
+def joint_acc_l2(
+    env,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """DreamWaQ Table I: joint acceleration squared."""
+    robot = env.scene[asset_cfg.name]
+    joint_acc = _finite(
+        robot.data.joint_acc[:, asset_cfg.joint_ids],
+        clamp_abs=_MAX_ABS_JOINT_ACC,
+    )
+    return torch.sum(torch.square(joint_acc), dim=1)
+
+
+def action_rate_l2(env) -> torch.Tensor:
+    """DreamWaQ Table I: (a_t - a_{t-1})^2."""
+    action = _finite(env.action_manager.action)
+    previous_action = _finite(env.action_manager.prev_action)
+    reward = torch.sum(torch.square(action - previous_action), dim=1)
+    return reward.clamp(max=_MAX_ACTION_RATE_REWARD)
 
 
 def joint_power(
@@ -196,3 +302,26 @@ class ActionSmoothnessPenalty(ManagerTermBase):
 
         self.previous_previous_action.copy_(previous_action)
         return _finite(penalty, clamp_abs=100.0)
+
+
+# Compatibility aliases for environment configs that used Isaac Lab naming.
+flat_orientation_l2 = orientation_l2
+dof_acc_l2 = joint_acc_l2
+
+
+__all__ = [
+    "track_lin_vel_xy_exp",
+    "track_ang_vel_z_exp",
+    "lin_vel_z_l2",
+    "ang_vel_xy_l2",
+    "orientation_l2",
+    "flat_orientation_l2",
+    "joint_acc_l2",
+    "dof_acc_l2",
+    "joint_power",
+    "body_height_l2",
+    "foot_clearance",
+    "action_rate_l2",
+    "ActionSmoothnessPenalty",
+    "power_distribution",
+]
