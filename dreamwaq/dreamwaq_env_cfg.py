@@ -13,10 +13,17 @@ import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 from .dreamwaq_rewards import (
     ActionSmoothnessPenalty,
+    action_rate_l2,
+    ang_vel_xy_l2,
     body_height_l2,
+    dof_acc_l2,
+    flat_orientation_l2,
     foot_clearance,
     joint_power,
+    lin_vel_z_l2,
     power_distribution,
+    track_ang_vel_z_exp,
+    track_lin_vel_xy_exp,
 )
 
 
@@ -94,8 +101,6 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.scene.terrain.max_init_terrain_level = 0
-
         configure_physx_gpu_capacity(self.sim.physics)
 
         # DreamWaQ domain randomization ranges from the paper.
@@ -127,18 +132,49 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
             },
         )
 
-        # rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 1.0
-        self.rewards.track_ang_vel_z_exp.weight = 0.5
-        self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -0.2
-        self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.action_rate_l2.weight = -0.01
-
-        # DreamWaQ reward terms from the paper.
+        # DreamWaQ Table I rewards.
+        # Do not only adjust inherited Isaac Lab reward weights here.
+        # Rebind every paper reward to the implementation in dreamwaq_rewards.py.
+        self.rewards.track_lin_vel_xy_exp = RewTerm(
+            func=track_lin_vel_xy_exp,
+            weight=1.0,
+            params={
+                "command_name": "base_velocity",
+                "std": 0.5,
+            },
+        )
+        self.rewards.track_ang_vel_z_exp = RewTerm(
+            func=track_ang_vel_z_exp,
+            weight=0.5,
+            params={
+                "command_name": "base_velocity",
+                "std": 0.5,
+            },
+        )
+        self.rewards.lin_vel_z_l2 = RewTerm(
+            func=lin_vel_z_l2,
+            weight=-2.0,
+        )
+        self.rewards.ang_vel_xy_l2 = RewTerm(
+            func=ang_vel_xy_l2,
+            weight=-0.05,
+        )
+        self.rewards.flat_orientation_l2 = RewTerm(
+            func=flat_orientation_l2,
+            weight=-0.2,
+        )
+        self.rewards.dof_acc_l2 = RewTerm(
+            func=dof_acc_l2,
+            weight=-2.5e-7,
+        )
+        self.rewards.action_rate_l2 = RewTerm(
+            func=action_rate_l2,
+            weight=-0.01,
+        )
         self.rewards.dof_torques_l2 = None
         self.rewards.feet_air_time = None
+        self.rewards.undesired_contacts = None
+        self.rewards.dof_pos_limits = None
 
         self.rewards.joint_power = RewTerm(
             func=joint_power,
@@ -168,12 +204,10 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
             func=ActionSmoothnessPenalty,
             weight=-0.01,
         )
-        self.rewards.power_distribution = None
-
-        """ self.rewards.power_distribution = RewTerm(
+        self.rewards.power_distribution = RewTerm(
             func=power_distribution,
             weight=-1.0e-5,
-        ) """
+        )
 
         # actor: remove exteroceptive observations
         self.observations.policy.height_scan = None
