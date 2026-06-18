@@ -7,11 +7,17 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.managers.manager_base import ManagerTermBase
 
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
+from .dreamwaq_rewards import (
+    ActionSmoothnessPenalty,
+    body_height_l2,
+    foot_clearance,
+    joint_power,
+    power_distribution,
+)
 
 
 def configure_physx_gpu_capacity(physics_cfg) -> None:
@@ -41,93 +47,6 @@ def configure_physx_gpu_capacity(physics_cfg) -> None:
 
 def empty_cenet_features(env) -> torch.Tensor:
     return torch.zeros((env.num_envs, 19), device=env.device)
-
-
-def joint_power(
-    env,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Penalize total absolute mechanical power across all joints."""
-    robot = env.scene[asset_cfg.name]
-    torque = robot.data.applied_torque[:, asset_cfg.joint_ids]
-    joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
-    return torch.sum(torch.abs(torque) * torch.abs(joint_vel), dim=1)
-
-
-def foot_clearance(
-    env,
-    target_height: float,
-    asset_cfg: SceneEntityCfg,
-    sensor_cfg: SceneEntityCfg,
-) -> torch.Tensor:
-    """Penalize moving feet that deviate from the desired terrain-relative height."""
-    robot = env.scene[asset_cfg.name]
-    height_scanner = env.scene[sensor_cfg.name]
-
-    terrain_height = torch.mean(
-        height_scanner.data.ray_hits_w[..., 2],
-        dim=1,
-    )
-    foot_height = (
-        robot.data.body_pos_w[:, asset_cfg.body_ids, 2]
-        - terrain_height.unsqueeze(-1)
-    )
-    foot_lateral_speed = torch.linalg.vector_norm(
-        robot.data.body_lin_vel_w[:, asset_cfg.body_ids, :2],
-        dim=-1,
-    )
-
-    height_error = torch.square(target_height - foot_height)
-    return torch.sum(height_error * foot_lateral_speed, dim=1)
-
-
-def power_distribution(
-    env,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Penalize squared variance of mechanical power across joints."""
-    robot = env.scene[asset_cfg.name]
-    torque = robot.data.applied_torque[:, asset_cfg.joint_ids]
-    joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
-    mechanical_power = torque * joint_vel
-    power_variance = torch.var(
-        mechanical_power,
-        dim=1,
-        unbiased=False,
-    )
-    return torch.square(power_variance)
-
-
-class ActionSmoothnessPenalty(ManagerTermBase):
-    """Penalize the second finite difference of consecutive actions."""
-
-    def __init__(self, cfg, env):
-        super().__init__(cfg, env)
-        self.previous_previous_action = torch.zeros(
-            env.num_envs,
-            env.action_manager.total_action_dim,
-            device=env.device,
-        )
-
-    def reset(self, env_ids=None):
-        if env_ids is None:
-            self.previous_previous_action.zero_()
-        else:
-            self.previous_previous_action[env_ids] = 0.0
-
-    def __call__(self, env) -> torch.Tensor:
-        action = env.action_manager.action
-        previous_action = env.action_manager.prev_action
-
-        second_difference = (
-            action
-            - 2.0 * previous_action
-            + self.previous_previous_action
-        )
-        penalty = torch.sum(torch.square(second_difference), dim=1)
-
-        self.previous_previous_action.copy_(previous_action)
-        return penalty
 
 
 @configclass
@@ -224,7 +143,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
             weight=-2.0e-5,
         )
         self.rewards.body_height = RewTerm(
-            func=mdp.base_height_l2,
+            func=body_height_l2,
             weight=-1.0,
             params={
                 "target_height": 0.42,
