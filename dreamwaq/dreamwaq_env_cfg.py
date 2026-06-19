@@ -5,12 +5,14 @@ from isaaclab.utils.configclass import configclass
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
+from .dreamwaq_curriculums import dreamwaq_terrain_levels
 from .dreamwaq_rewards import (
     ActionSmoothnessPenalty,
     action_rate_l2,
@@ -101,8 +103,12 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # Start terrain curriculum near the easiest rows while keeping progression enabled.
-        self.scene.terrain.max_init_terrain_level = 7
+        # Keep Isaac Lab's default initial terrain range while using DreamWaQ's curriculum rule.
+        self.scene.terrain.max_init_terrain_level = 5
+
+        self.curriculum.terrain_levels = CurrTerm(
+            func=dreamwaq_terrain_levels,
+        )
 
         configure_physx_gpu_capacity(self.sim.physics)
 
