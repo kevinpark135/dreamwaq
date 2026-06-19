@@ -103,12 +103,15 @@ def cenet_loss(
     target_base_lin_vel: torch.Tensor,
     target_next_obs: torch.Tensor,
     beta: float = 1.0,
+    velocity_weight: float = 1.0,
+    reconstruction_weight: float = 1.0,
 ):
     """CENet loss.
 
-    L_CE = L_est + L_VAE
-    L_est = MSE(v_hat, v)
-    L_VAE = MSE(obs_recon, next_obs) + beta * KL(q(z|obs_history) || N(0, I))
+    L_CE = w_v * L_est + w_rec * L_rec + beta * L_KL
+    L_est = smooth L1(v_hat, v)
+    L_rec = MSE(obs_recon, next_obs)
+    L_KL = KL(q(z|obs_history) || N(0, I))
     """
     v_hat = outputs["v_hat"]
     obs_recon = outputs["obs_recon"]
@@ -128,14 +131,17 @@ def cenet_loss(
         neginf=-1.0e6,
     )
 
-    velocity_loss = F.mse_loss(v_hat, target_base_lin_vel)
+    target_base_lin_vel = target_base_lin_vel.clamp(-5.0, 5.0)
+    v_hat = v_hat.clamp(-5.0, 5.0)
+
+    velocity_loss = F.smooth_l1_loss(v_hat, target_base_lin_vel, beta=0.2)
     reconstruction_loss = F.mse_loss(obs_recon, target_next_obs)
 
     kl_loss = -0.5 * torch.mean(
         torch.sum(1.0 + logvar - mu.pow(2) - logvar.exp(), dim=-1)
     )
 
-    total_loss = velocity_loss + reconstruction_loss + beta * kl_loss
+    total_loss = velocity_weight * velocity_loss + reconstruction_weight * reconstruction_loss + beta * kl_loss
 
     return {
         "total_loss": total_loss,

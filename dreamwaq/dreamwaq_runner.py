@@ -8,6 +8,7 @@ import math
 import time
 
 import torch
+from isaaclab.utils.buffers import DelayBuffer
 from rsl_rl.runners import OnPolicyRunner
 from rsl_rl.utils import check_nan
 
@@ -89,22 +90,28 @@ class DreamWaQRunner(OnPolicyRunner):
             obs_history_dim=obs_history_dim,
             single_obs_dim=single_obs_dim,
             latent_dim=16,
-            hidden_dims=(128, 64),
+            hidden_dims=(256, 128),
         ).to(device)
 
-        self.cenet_optimizer = torch.optim.Adam(
-            self.cenet.parameters(), lr=1e-3
+        self.cenet_optimizer = torch.optim.AdamW(
+            self.cenet.parameters(), lr=2e-3, weight_decay=1.0e-5
         )
 
         self.single_obs_dim = single_obs_dim
         self.obs_history_dim = obs_history_dim
         self.cenet_batch_size = 1024
+        self.cenet_num_epochs = 2
         self.cenet_obs_normalizer = RunningMeanStd(
             shape=(self.single_obs_dim,),
             device=self.device,
         )
-        self.adaboot_probability = 0.0
+        self.max_system_delay_s = 0.015
+        self.max_action_delay_steps = max(0, math.ceil(self.max_system_delay_s / self.base_env.step_dt))
+        self.action_delay_buffer = None
+        self.adaboot_probability = 0.35
         self.adaboot_reward_cv = 0.0
+        self.adaboot_target_probability = 0.65
+        self.adaboot_ema_alpha = 0.25
         self.adaboot_episode_returns = torch.zeros(
             self.base_env.num_envs,
             device=self.device,
@@ -212,6 +219,44 @@ class DreamWaQRunner(OnPolicyRunner):
 
         return normalized.reshape(original_shape)
 
+    def _sample_action_delay_lag(self, env_ids=None):
+        if self.action_delay_buffer is None:
+            return
+        if self.max_action_delay_steps == 0:
+            self.action_delay_buffer.set_time_lag(0, batch_ids=env_ids)
+            return
+
+        if env_ids is None:
+            num_envs = self.base_env.num_envs
+        else:
+            num_envs = int(env_ids.numel())
+        lags = torch.randint(
+            0,
+            self.max_action_delay_steps + 1,
+            (num_envs,),
+            dtype=torch.int,
+            device=self.device,
+        )
+        self.action_delay_buffer.set_time_lag(lags, batch_ids=env_ids)
+
+    def _apply_action_delay(self, actions):
+        if self.action_delay_buffer is None:
+            self.action_delay_buffer = DelayBuffer(
+                self.max_action_delay_steps,
+                actions.shape[0],
+                self.device,
+            )
+            self._sample_action_delay_lag()
+        delayed_actions = self.action_delay_buffer.compute(actions.to(self.device))
+        return delayed_actions
+
+    def _reset_action_delay(self, done_mask):
+        if self.action_delay_buffer is None or not done_mask.any():
+            return
+        env_ids = torch.nonzero(done_mask, as_tuple=False).flatten().to(self.device)
+        self.action_delay_buffer.reset(env_ids)
+        self._sample_action_delay_lag(env_ids)
+
     @torch.no_grad()
     def _update_adaboot(self, completed_returns):
         if completed_returns.numel() < 2:
@@ -220,10 +265,16 @@ class DreamWaQRunner(OnPolicyRunner):
         reward_mean = completed_returns.mean()
         reward_std = completed_returns.std(unbiased=False)
         reward_cv = reward_std / reward_mean.abs().clamp_min(1e-6)
-        probability = 1.0 - torch.tanh(reward_cv)
+
+        stability = 1.0 - torch.tanh(reward_cv)
+        probability_target = self.adaboot_target_probability + 0.20 * (stability - self.adaboot_target_probability)
+        probability_target = probability_target.clamp(0.45, 0.75).item()
 
         self.adaboot_reward_cv = reward_cv.item()
-        self.adaboot_probability = probability.clamp(0.0, 1.0).item()
+        self.adaboot_probability = (
+            (1.0 - self.adaboot_ema_alpha) * self.adaboot_probability
+            + self.adaboot_ema_alpha * probability_target
+        )
 
     def _add_cenet_features(self, obs, use_adaboot=False):
         """Add CENet features, optionally applying AdaBoot."""
@@ -344,12 +395,14 @@ class DreamWaQRunner(OnPolicyRunner):
                     self._sanitize_optimizer_state()
                     obs = self._sanitize_observations(obs)
                     actions = self.alg.act(obs)
+                    actions = self._apply_action_delay(actions)
                     obs, rewards, dones, extras = self.env.step(
                         actions.to(self.env.device)
                     )
 
                     step_rewards = rewards.to(self.device).reshape(-1)
                     done_mask = dones.to(self.device).bool().reshape(-1)
+                    self._reset_action_delay(done_mask)
                     self.adaboot_episode_returns += step_rewards
 
                     valid_done_mask = done_mask & self.adaboot_episode_valid
@@ -444,67 +497,71 @@ class DreamWaQRunner(OnPolicyRunner):
                     "kl": 0.0,
                 }
 
-                permutation = torch.randperm(
-                    num_valid_samples,
-                    device=self.device,
-                )
-
-                for start_idx in range(
-                    0,
-                    num_valid_samples,
-                    self.cenet_batch_size,
-                ):
-                    batch_indices = permutation[
-                        start_idx : start_idx + self.cenet_batch_size
-                    ]
-
-                    batch_history = obs_history_tensor[batch_indices]
-                    batch_next_obs = next_obs_tensor[batch_indices]
-                    batch_base_lin_vel = base_lin_vel_tensor[batch_indices]
-
-                    cenet_out = self.cenet(batch_history)
-
-                    ce_loss = cenet_loss(
-                        cenet_out,
-                        target_base_lin_vel=batch_base_lin_vel,
-                        target_next_obs=batch_next_obs,
-                        beta=1.0,
+                for _ in range(self.cenet_num_epochs):
+                    permutation = torch.randperm(
+                        num_valid_samples,
+                        device=self.device,
                     )
 
-                    self.cenet_optimizer.zero_grad(set_to_none=True)
-                    ce_loss["total_loss"].backward()
-                    torch.nn.utils.clip_grad_norm_(
-                        self.cenet.parameters(),
-                        max_norm=1.0,
-                    )
-                    self.cenet_optimizer.step()
+                    for start_idx in range(
+                        0,
+                        num_valid_samples,
+                        self.cenet_batch_size,
+                    ):
+                        batch_indices = permutation[
+                            start_idx : start_idx + self.cenet_batch_size
+                        ]
 
-                    batch_size = batch_indices.shape[0]
+                        batch_history = obs_history_tensor[batch_indices]
+                        batch_next_obs = next_obs_tensor[batch_indices]
+                        batch_base_lin_vel = base_lin_vel_tensor[batch_indices]
 
-                    loss_sums["total"] += (
-                        ce_loss["total_loss"].item() * batch_size
-                    )
-                    loss_sums["velocity"] += (
-                        ce_loss["velocity_loss"].item() * batch_size
-                    )
-                    loss_sums["reconstruction"] += (
-                        ce_loss["reconstruction_loss"].item() * batch_size
-                    )
-                    loss_sums["kl"] += (
-                        ce_loss["kl_loss"].item() * batch_size
-                    )
+                        cenet_out = self.cenet(batch_history)
 
+                        ce_loss = cenet_loss(
+                            cenet_out,
+                            target_base_lin_vel=batch_base_lin_vel,
+                            target_next_obs=batch_next_obs,
+                            beta=0.1,
+                            velocity_weight=2.0,
+                            reconstruction_weight=0.5,
+                        )
+
+                        self.cenet_optimizer.zero_grad(set_to_none=True)
+                        ce_loss["total_loss"].backward()
+                        torch.nn.utils.clip_grad_norm_(
+                            self.cenet.parameters(),
+                            max_norm=1.0,
+                        )
+                        self.cenet_optimizer.step()
+
+                        batch_size = batch_indices.shape[0]
+
+                        loss_sums["total"] += (
+                            ce_loss["total_loss"].item() * batch_size
+                        )
+                        loss_sums["velocity"] += (
+                            ce_loss["velocity_loss"].item() * batch_size
+                        )
+                        loss_sums["reconstruction"] += (
+                            ce_loss["reconstruction_loss"].item() * batch_size
+                        )
+                        loss_sums["kl"] += (
+                            ce_loss["kl_loss"].item() * batch_size
+                        )
+
+                loss_normalizer = num_valid_samples * self.cenet_num_epochs
                 loss_dict["CENet/total"] = (
-                    loss_sums["total"] / num_valid_samples
+                    loss_sums["total"] / loss_normalizer
                 )
                 loss_dict["CENet/velocity"] = (
-                    loss_sums["velocity"] / num_valid_samples
+                    loss_sums["velocity"] / loss_normalizer
                 )
                 loss_dict["CENet/reconstruction"] = (
-                    loss_sums["reconstruction"] / num_valid_samples
+                    loss_sums["reconstruction"] / loss_normalizer
                 )
                 loss_dict["CENet/kl"] = (
-                    loss_sums["kl"] / num_valid_samples
+                    loss_sums["kl"] / loss_normalizer
                 )
 
             else:

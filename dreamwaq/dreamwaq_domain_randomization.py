@@ -2,76 +2,63 @@
 
 from __future__ import annotations
 
-import math
-from collections.abc import Sequence
-
 import torch
-from isaaclab.actuators import ImplicitActuator
-from isaaclab.assets import Articulation
-from isaaclab.envs import ManagerBasedEnv
-from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction
-from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.buffers import DelayBuffer
 
 
-class DelayedJointPositionAction(JointPositionAction):
-    """Joint position action with per-environment command delay randomization."""
+def randomize_payload_mass(
+    env,
+    env_ids: torch.Tensor | None,
+    mass_distribution_params: tuple[float, float],
+    asset_cfg,
+    min_mass: float = 1.0,
+):
+    """Add a bounded payload mass offset to selected bodies.
 
-    max_system_delay_s = 0.015
+    Isaac Lab's generic mass randomizer is scale-oriented for the stock A1 task.
+    DreamWaQ uses an absolute payload range, so sanitize the sampled masses before
+    sending them to PhysX to avoid invalid inertial values during startup.
+    """
 
-    def __init__(self, cfg, env: ManagerBasedEnv):
-        super().__init__(cfg, env)
+    asset = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=asset.device, dtype=torch.long)
 
-        self._max_delay_steps = max(0, math.ceil(self.max_system_delay_s / env.step_dt))
-        self._delay_buffer = DelayBuffer(self._max_delay_steps, self.num_envs, self.device)
-        self._sample_delay_lag()
+    if isinstance(asset_cfg.body_ids, slice):
+        body_ids = torch.arange(asset.num_bodies, dtype=torch.long, device=asset.device)
+    else:
+        body_ids = torch.as_tensor(asset_cfg.body_ids, dtype=torch.long, device=asset.device)
 
-    def process_actions(self, actions: torch.Tensor):
-        super().process_actions(actions)
-        self._processed_actions = self._delay_buffer.compute(self._processed_actions)
+    default_key = "_dreamwaq_default_body_mass"
+    if not hasattr(asset, default_key):
+        setattr(asset, default_key, asset.data.body_mass.torch.clone())
+    default_mass = getattr(asset, default_key)
 
-    def reset(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
-        if env_ids is None:
-            super().reset(slice(None))
-            self._delay_buffer.reset()
-            self._sample_delay_lag()
-            return
+    low, high = mass_distribution_params
+    payload = torch.empty((env_ids.numel(), body_ids.numel()), device=asset.device).uniform_(low, high)
+    masses = default_mass[env_ids[:, None], body_ids].clone() + payload
+    masses = torch.nan_to_num(masses, nan=min_mass, posinf=min_mass, neginf=min_mass)
+    masses = masses.clamp_min(min_mass).contiguous()
 
-        super().reset(env_ids)
-        self._delay_buffer.reset(env_ids)
-        self._sample_delay_lag(env_ids)
-
-    def _sample_delay_lag(self, env_ids: Sequence[int] | torch.Tensor | None = None) -> None:
-        if self._max_delay_steps == 0:
-            self._delay_buffer.set_time_lag(0, batch_ids=env_ids)
-            return
-
-        if env_ids is None:
-            num_envs = self.num_envs
-        elif isinstance(env_ids, torch.Tensor):
-            num_envs = env_ids.numel()
-        else:
-            num_envs = len(env_ids)
-
-        time_lag = torch.randint(
-            0,
-            self._max_delay_steps + 1,
-            (num_envs,),
-            dtype=torch.long,
-            device=self.device,
-        )
-        self._delay_buffer.set_time_lag(time_lag, batch_ids=env_ids)
+    asset.set_masses_index(
+        masses=masses,
+        body_ids=body_ids.to(dtype=torch.int32),
+        env_ids=env_ids.to(dtype=torch.int32),
+    )
 
 
 def randomize_motor_strength(
-    env: ManagerBasedEnv,
+    env,
     env_ids: torch.Tensor | None,
     strength_distribution_params: tuple[float, float],
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    asset_cfg,
 ):
     """Scale actuator torque limits to emulate motor strength variation."""
 
-    asset: Articulation = env.scene[asset_cfg.name]
+    from isaaclab.actuators import ImplicitActuator
+
+    asset = env.scene[asset_cfg.name]
     if env_ids is None:
         env_ids = torch.arange(env.scene.num_envs, device=asset.device)
     else:
