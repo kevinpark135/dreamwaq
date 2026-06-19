@@ -102,7 +102,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         super().__post_init__()
 
         # Start terrain curriculum near the easiest rows while keeping progression enabled.
-        self.scene.terrain.max_init_terrain_level = 1
+        self.scene.terrain.max_init_terrain_level = 7
 
         configure_physx_gpu_capacity(self.sim.physics)
 
