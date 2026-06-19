@@ -90,17 +90,17 @@ class DreamWaQRunner(OnPolicyRunner):
             obs_history_dim=obs_history_dim,
             single_obs_dim=single_obs_dim,
             latent_dim=16,
-            hidden_dims=(256, 128),
+            hidden_dims=(128, 64),
         ).to(device)
 
-        self.cenet_optimizer = torch.optim.AdamW(
-            self.cenet.parameters(), lr=2e-3, weight_decay=1.0e-5
+        self.cenet_optimizer = torch.optim.Adam(
+            self.cenet.parameters(), lr=1e-3
         )
 
         self.single_obs_dim = single_obs_dim
         self.obs_history_dim = obs_history_dim
         self.cenet_batch_size = 1024
-        self.cenet_num_epochs = 2
+        self.cenet_num_epochs = 1
         self.cenet_obs_normalizer = RunningMeanStd(
             shape=(self.single_obs_dim,),
             device=self.device,
@@ -522,9 +522,9 @@ class DreamWaQRunner(OnPolicyRunner):
                             cenet_out,
                             target_base_lin_vel=batch_base_lin_vel,
                             target_next_obs=batch_next_obs,
-                            beta=0.1,
-                            velocity_weight=2.0,
-                            reconstruction_weight=0.5,
+                            beta=1.0,
+                            velocity_weight=1.0,
+                            reconstruction_weight=1.0,
                         )
 
                         self.cenet_optimizer.zero_grad(set_to_none=True)

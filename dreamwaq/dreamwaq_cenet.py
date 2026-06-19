@@ -109,7 +109,7 @@ def cenet_loss(
     """CENet loss.
 
     L_CE = w_v * L_est + w_rec * L_rec + beta * L_KL
-    L_est = smooth L1(v_hat, v)
+    L_est = MSE(v_hat, v)
     L_rec = MSE(obs_recon, next_obs)
     L_KL = KL(q(z|obs_history) || N(0, I))
     """
@@ -134,7 +134,7 @@ def cenet_loss(
     target_base_lin_vel = target_base_lin_vel.clamp(-5.0, 5.0)
     v_hat = v_hat.clamp(-5.0, 5.0)
 
-    velocity_loss = F.smooth_l1_loss(v_hat, target_base_lin_vel, beta=0.2)
+    velocity_loss = F.mse_loss(v_hat, target_base_lin_vel)
     reconstruction_loss = F.mse_loss(obs_recon, target_next_obs)
 
     kl_loss = -0.5 * torch.mean(
