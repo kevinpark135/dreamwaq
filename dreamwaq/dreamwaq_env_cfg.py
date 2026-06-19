@@ -13,6 +13,7 @@ import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 
 from ..rough_env_cfg import UnitreeA1RoughEnvCfg, UnitreeA1RoughEnvCfg_PLAY
 from .dreamwaq_curriculums import dreamwaq_terrain_levels
+from .dreamwaq_domain_randomization import DelayedJointPositionAction, randomize_motor_strength
 from .dreamwaq_rewards import (
     ActionSmoothnessPenalty,
     action_rate_l2,
@@ -113,6 +114,8 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         configure_physx_gpu_capacity(self.sim.physics)
 
         # DreamWaQ domain randomization ranges from the paper.
+        self.actions.joint_pos.class_type = DelayedJointPositionAction
+
         self.events.physics_material.params["static_friction_range"] = (0.2, 1.25)
         self.events.physics_material.params["dynamic_friction_range"] = (0.2, 1.25)
         self.events.physics_material.params["restitution_range"] = (0.0, 0.0)
@@ -125,9 +128,18 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
 
         self.events.add_base_mass.params["recompute_inertia"] = False
 
-        # Disable CoM randomization for now. On this Isaac Sim/PhysX setup it
-        # repeatedly triggers setCMassLocalPose invalid-parameter errors.
-        self.events.base_com = None
+        self.events.base_com = EventTerm(
+            func=mdp.randomize_rigid_body_com,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+                "com_range": {
+                    "x": (-0.05, 0.05),
+                    "y": (-0.05, 0.05),
+                    "z": (-0.05, 0.05),
+                },
+            },
+        )
 
         self.events.actuator_gains = EventTerm(
             func=mdp.randomize_actuator_gains,
@@ -138,6 +150,14 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
                 "damping_distribution_params": (0.9, 1.1),
                 "operation": "scale",
                 "distribution": "uniform",
+            },
+        )
+        self.events.motor_strength = EventTerm(
+            func=randomize_motor_strength,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "strength_distribution_params": (0.9, 1.1),
             },
         )
 
@@ -244,3 +264,4 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
         self.events.add_base_mass = None
         self.events.base_com = None
         self.events.actuator_gains = None
+        self.events.motor_strength = None
