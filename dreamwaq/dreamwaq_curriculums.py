@@ -30,12 +30,11 @@ def dreamwaq_terrain_levels(
     env,
     env_ids: Sequence[int],
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    min_terrain_level: int = 1,
-    min_episode_progress_for_down: float = 0.15,
-    reward_rate_keep_threshold: float = 0.25,
-    reward_rate_up_threshold: float = 0.55,
-    low_distance_ratio_for_down: float = 0.35,
-    keep_distance_ratio: float = 0.20,
+    min_episode_progress_for_down: float = 0.25,
+    reward_rate_keep_threshold: float = 0.05,
+    reward_rate_up_threshold: float = 0.70,
+    low_distance_ratio_for_down: float = 0.20,
+    keep_distance_ratio: float = 0.25,
 ) -> torch.Tensor:
     """Reward-aware terrain curriculum for DreamWaQ.
 
@@ -69,8 +68,7 @@ def dreamwaq_terrain_levels(
     episode_progress = elapsed_steps / float(env.max_episode_length)
     reward_rate = _episode_return(env, env_ids) / elapsed_time
 
-    current_levels = terrain.terrain_levels[env_ids]
-    distance_success = distance > terrain_length * 0.45
+    distance_success = distance > terrain_length / 2.0
     reward_success = reward_rate > reward_rate_up_threshold
     useful_progress = distance > terrain_length * keep_distance_ratio
     move_up = reward_success & (distance_success | useful_progress)
@@ -78,14 +76,8 @@ def dreamwaq_terrain_levels(
     commanded_distance = commanded_distance.clamp_min(terrain_length * 0.25)
     very_low_distance = distance < commanded_distance * low_distance_ratio_for_down
     poor_return = reward_rate < reward_rate_keep_threshold
-    stalled_on_hard_terrain = (
-        (distance < terrain_length * keep_distance_ratio)
-        & (reward_rate < reward_rate_up_threshold * 0.8)
-        & (current_levels > min_terrain_level)
-    )
     enough_time_to_judge = episode_progress > min_episode_progress_for_down
-    move_down = ((very_low_distance & poor_return) | stalled_on_hard_terrain) & enough_time_to_judge
-    move_down &= current_levels > min_terrain_level
+    move_down = very_low_distance & poor_return & enough_time_to_judge
     move_down &= ~move_up
 
     terrain.update_env_origins(env_ids, move_up, move_down)

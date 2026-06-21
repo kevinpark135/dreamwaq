@@ -15,3 +15,10 @@ CLI commands:
   --num_envs 4096 \
   --max_iterations 1000 \
   --seed 1
+
+  ./isaaclab.sh -p ~/research/a1/dreamwaq/play_dreamwaq.py \
+  --task Isaac-DreamWaQ-A1-v0 \
+  --num_envs 16 \
+  --checkpoint ~/research/logs/dreamwaq_a1_rough/trial1/model_999.pt \
+  --real-time \
+  --viz kit

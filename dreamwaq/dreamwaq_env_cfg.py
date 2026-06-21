@@ -105,7 +105,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         super().__post_init__()
 
         # Keep Isaac Lab's default initial terrain range while using DreamWaQ's curriculum rule.
-        self.scene.terrain.max_init_terrain_level = 4
+        self.scene.terrain.max_init_terrain_level = 5
 
         self.curriculum.terrain_levels = CurrTerm(
             func=dreamwaq_terrain_levels,
@@ -168,18 +168,18 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         # Rebind every paper reward to the implementation in dreamwaq_rewards.py.
         self.rewards.track_lin_vel_xy_exp = RewTerm(
             func=track_lin_vel_xy_exp,
-            weight=1.10,
+            weight=1.35,
             params={
                 "command_name": "base_velocity",
-                "std": 0.5,
+                "std": 0.55,
             },
         )
         self.rewards.track_ang_vel_z_exp = RewTerm(
             func=track_ang_vel_z_exp,
-            weight=0.55,
+            weight=0.65,
             params={
                 "command_name": "base_velocity",
-                "std": 0.5,
+                "std": 0.55,
             },
         )
         self.rewards.lin_vel_z_l2 = RewTerm(
@@ -188,7 +188,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         )
         self.rewards.ang_vel_xy_l2 = RewTerm(
             func=ang_vel_xy_l2,
-            weight=-0.045,
+            weight=-0.035,
         )
         self.rewards.flat_orientation_l2 = RewTerm(
             func=flat_orientation_l2,
@@ -200,7 +200,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         )
         self.rewards.action_rate_l2 = RewTerm(
             func=action_rate_l2,
-            weight=-0.008,
+            weight=-0.006,
         )
         self.rewards.dof_torques_l2 = None
         self.rewards.feet_air_time = None
@@ -209,11 +209,11 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
 
         self.rewards.joint_power = RewTerm(
             func=joint_power,
-            weight=-1.6e-5,
+            weight=-1.2e-5,
         )
         self.rewards.body_height = RewTerm(
             func=body_height_l2,
-            weight=-0.8,
+            weight=-0.55,
             params={
                 "target_height": 0.42,
                 "sensor_cfg": SceneEntityCfg("height_scanner"),
@@ -221,7 +221,7 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         )
         self.rewards.foot_clearance = RewTerm(
             func=foot_clearance,
-            weight=-0.008,
+            weight=-0.006,
             params={
                 "target_height": 0.08,
                 "asset_cfg": SceneEntityCfg(
@@ -233,11 +233,11 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         )
         self.rewards.action_smoothness = RewTerm(
             func=ActionSmoothnessPenalty,
-            weight=-0.008,
+            weight=-0.004,
         )
         self.rewards.power_distribution = RewTerm(
             func=power_distribution,
-            weight=-8.0e-6,
+            weight=-5.0e-6,
         )
 
         # actor: remove exteroceptive observations
