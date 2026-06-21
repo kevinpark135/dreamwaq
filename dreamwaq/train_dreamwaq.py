@@ -50,8 +50,10 @@ parser.add_argument(
 )
 parser.add_argument(
     "--max_iterations",
+    "--max_iteration",
     type=int,
     default=None,
+    dest="max_iterations",
     help="Number of learning iterations.",
 )
 parser.add_argument("--seed", type=int, default=None, help="Training seed.")
@@ -86,6 +88,8 @@ def main(
         agent_cfg = handle_deprecated_rsl_rl_cfg(
             agent_cfg, installed_rsl_rl_version
         )
+        if args_cli.max_iterations is not None:
+            agent_cfg.max_iterations = args_cli.max_iterations
         agent_cfg.obs_groups = {
             "actor": ["policy", "cenet"],
             "critic": ["critic"],
@@ -114,6 +118,7 @@ def main(
 
         print(f"[INFO] Logging experiment in: {log_dir}")
         print(f"[INFO] DreamWaQ runner entry point: {runner_entry_point}")
+        print(f"[INFO] Max learning iterations: {agent_cfg.max_iterations}")
 
         train_cfg = agent_cfg.to_dict()
 
