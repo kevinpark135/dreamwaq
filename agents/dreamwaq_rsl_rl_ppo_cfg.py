@@ -8,7 +8,7 @@ class DreamWaQA1RoughPPORunnerCfg(UnitreeA1RoughPPORunnerCfg):
         super().__post_init__()
 
         self.experiment_name = "dreamwaq_a1_rough"
-        self.max_iterations = 0
+        self.max_iterations = 10000
 
         self.actor.distribution_cfg.init_std = 0.5
         self.actor.distribution_cfg.std_type = "log"

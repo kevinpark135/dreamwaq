@@ -52,7 +52,7 @@ parser.add_argument(
     "--max_iterations",
     type=int,
     default=None,
-    help="Number of learning iterations. Use 0 or a negative value to train until interrupted.",
+    help="Number of learning iterations.",
 )
 parser.add_argument("--seed", type=int, default=None, help="Training seed.")
 parser.add_argument(
@@ -159,13 +159,9 @@ def main(
         dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
         start_time = time.time()
-        num_learning_iterations = agent_cfg.max_iterations
-        if num_learning_iterations <= 0:
-            num_learning_iterations = None
-
         try:
             runner.learn(
-                num_learning_iterations=num_learning_iterations,
+                num_learning_iterations=agent_cfg.max_iterations,
                 init_at_random_ep_len=args_cli.checkpoint is None,
             )
             print(f"[INFO] Training time: {time.time() - start_time:.2f} seconds")

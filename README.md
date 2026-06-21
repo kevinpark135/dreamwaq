@@ -6,6 +6,7 @@ CLI commands:
   --task Isaac-DreamWaQ-A1-v0 \
   --headless \
   --num_envs 4096 \
+  --max_iterations 1000 \
   --seed 1
 
 ./isaaclab.sh -p ~/research/a1/dreamwaq/train_baseline.py \
