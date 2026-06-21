@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import math
 import time
+import sys
 
 import torch
 from isaaclab.utils.buffers import DelayBuffer
@@ -368,7 +369,10 @@ class DreamWaQRunner(OnPolicyRunner):
         self.logger.init_logging_writer()
 
         start_it = self.current_learning_iteration
-        total_it = start_it + num_learning_iterations
+        if num_learning_iterations is None:
+            total_it = sys.maxsize
+        else:
+            total_it = start_it + num_learning_iterations
 
         for it in range(start_it, total_it):
             start = time.time()
