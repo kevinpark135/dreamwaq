@@ -108,12 +108,8 @@ class DreamWaQRunner(OnPolicyRunner):
         self.max_system_delay_s = 0.015
         self.max_action_delay_steps = max(0, math.ceil(self.max_system_delay_s / self.base_env.step_dt))
         self.action_delay_buffer = None
-        self.adaboot_probability = 0.35
+        self.adaboot_probability = 0.0
         self.adaboot_reward_cv = 0.0
-        self.adaboot_target_probability = 0.65
-        self.adaboot_ema_alpha = 0.25
-        self.adaboot_warmup_iterations = 400
-        self.adaboot_ramp_iterations = 200
         self.adaboot_episode_returns = torch.zeros(
             self.base_env.num_envs,
             device=self.device,
@@ -268,25 +264,8 @@ class DreamWaQRunner(OnPolicyRunner):
         reward_std = completed_returns.std(unbiased=False)
         reward_cv = reward_std / reward_mean.abs().clamp_min(1e-6)
 
-        stability = 1.0 - torch.tanh(reward_cv)
-        probability_target = self.adaboot_target_probability + 0.20 * (stability - self.adaboot_target_probability)
-        probability_target = probability_target.clamp(0.45, 0.75).item()
-
         self.adaboot_reward_cv = reward_cv.item()
-        self.adaboot_probability = (
-            (1.0 - self.adaboot_ema_alpha) * self.adaboot_probability
-            + self.adaboot_ema_alpha * probability_target
-        )
-
-    def _effective_adaboot_probability(self) -> float:
-        if self.current_learning_iteration < self.adaboot_warmup_iterations:
-            return 0.0
-
-        ramp_progress = (
-            self.current_learning_iteration - self.adaboot_warmup_iterations
-        ) / max(float(self.adaboot_ramp_iterations), 1.0)
-        ramp_progress = min(max(ramp_progress, 0.0), 1.0)
-        return self.adaboot_probability * ramp_progress
+        self.adaboot_probability = (1.0 - torch.tanh(reward_cv)).clamp(0.0, 1.0).item()
 
     def _add_cenet_features(self, obs, use_adaboot=False):
         """Add CENet features, optionally applying AdaBoot."""
@@ -308,7 +287,6 @@ class DreamWaQRunner(OnPolicyRunner):
         )
 
         if use_adaboot:
-            adaboot_probability = self._effective_adaboot_probability()
             ground_truth_velocity = (
                 self.base_env.scene["robot"].data.root_lin_vel_b.to(self.device)
             )
@@ -322,7 +300,7 @@ class DreamWaQRunner(OnPolicyRunner):
                 estimated_velocity.shape[0],
                 1,
                 device=self.device,
-            ) < adaboot_probability
+            ) < self.adaboot_probability
             actor_velocity = torch.where(
                 bootstrap_mask,
                 estimated_velocity,
@@ -584,8 +562,7 @@ class DreamWaQRunner(OnPolicyRunner):
                 loss_dict["CENet/kl"] = 0.0
 
             loss_dict["CENet/valid_samples"] = num_valid_samples
-            loss_dict["AdaBoot/probability"] = self._effective_adaboot_probability()
-            loss_dict["AdaBoot/internal_probability"] = self.adaboot_probability
+            loss_dict["AdaBoot/probability"] = self.adaboot_probability
             loss_dict["AdaBoot/reward_cv"] = self.adaboot_reward_cv
             loss_dict["AdaBoot/completed_episodes"] = num_completed_episodes
 
