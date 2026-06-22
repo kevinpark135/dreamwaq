@@ -112,6 +112,8 @@ class DreamWaQRunner(OnPolicyRunner):
         self.adaboot_reward_cv = 0.0
         self.adaboot_target_probability = 0.65
         self.adaboot_ema_alpha = 0.25
+        self.adaboot_warmup_iterations = 400
+        self.adaboot_ramp_iterations = 200
         self.adaboot_episode_returns = torch.zeros(
             self.base_env.num_envs,
             device=self.device,
@@ -276,6 +278,16 @@ class DreamWaQRunner(OnPolicyRunner):
             + self.adaboot_ema_alpha * probability_target
         )
 
+    def _effective_adaboot_probability(self) -> float:
+        if self.current_learning_iteration < self.adaboot_warmup_iterations:
+            return 0.0
+
+        ramp_progress = (
+            self.current_learning_iteration - self.adaboot_warmup_iterations
+        ) / max(float(self.adaboot_ramp_iterations), 1.0)
+        ramp_progress = min(max(ramp_progress, 0.0), 1.0)
+        return self.adaboot_probability * ramp_progress
+
     def _add_cenet_features(self, obs, use_adaboot=False):
         """Add CENet features, optionally applying AdaBoot."""
         obs_history = self.base_env.obs_history.to(self.device)
@@ -296,6 +308,7 @@ class DreamWaQRunner(OnPolicyRunner):
         )
 
         if use_adaboot:
+            adaboot_probability = self._effective_adaboot_probability()
             ground_truth_velocity = (
                 self.base_env.scene["robot"].data.root_lin_vel_b.to(self.device)
             )
@@ -309,7 +322,7 @@ class DreamWaQRunner(OnPolicyRunner):
                 estimated_velocity.shape[0],
                 1,
                 device=self.device,
-            ) < self.adaboot_probability
+            ) < adaboot_probability
             actor_velocity = torch.where(
                 bootstrap_mask,
                 estimated_velocity,
@@ -523,8 +536,8 @@ class DreamWaQRunner(OnPolicyRunner):
                             target_base_lin_vel=batch_base_lin_vel,
                             target_next_obs=batch_next_obs,
                             beta=0.1,
-                            velocity_weight=2.0,
-                            reconstruction_weight=0.5,
+                            velocity_weight=6.0,
+                            reconstruction_weight=0.25,
                         )
 
                         self.cenet_optimizer.zero_grad(set_to_none=True)
@@ -571,7 +584,8 @@ class DreamWaQRunner(OnPolicyRunner):
                 loss_dict["CENet/kl"] = 0.0
 
             loss_dict["CENet/valid_samples"] = num_valid_samples
-            loss_dict["AdaBoot/probability"] = self.adaboot_probability
+            loss_dict["AdaBoot/probability"] = self._effective_adaboot_probability()
+            loss_dict["AdaBoot/internal_probability"] = self.adaboot_probability
             loss_dict["AdaBoot/reward_cv"] = self.adaboot_reward_cv
             loss_dict["AdaBoot/completed_episodes"] = num_completed_episodes
 

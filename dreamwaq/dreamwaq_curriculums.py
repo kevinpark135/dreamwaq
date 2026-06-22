@@ -32,7 +32,9 @@ def dreamwaq_terrain_levels(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     min_episode_progress_for_down: float = 0.25,
     reward_rate_keep_threshold: float = 0.05,
-    reward_rate_up_threshold: float = 0.70,
+    reward_rate_up_threshold: float = 1.00,
+    reward_rate_level_scale: float = 0.15,
+    up_distance_ratio: float = 0.65,
     low_distance_ratio_for_down: float = 0.20,
     keep_distance_ratio: float = 0.25,
 ) -> torch.Tensor:
@@ -68,10 +70,11 @@ def dreamwaq_terrain_levels(
     episode_progress = elapsed_steps / float(env.max_episode_length)
     reward_rate = _episode_return(env, env_ids) / elapsed_time
 
-    distance_success = distance > terrain_length / 2.0
-    reward_success = reward_rate > reward_rate_up_threshold
-    useful_progress = distance > terrain_length * keep_distance_ratio
-    move_up = reward_success & (distance_success | useful_progress)
+    current_levels = terrain.terrain_levels[env_ids].float()
+    distance_success = distance > terrain_length * up_distance_ratio
+    reward_threshold = reward_rate_up_threshold * (1.0 + reward_rate_level_scale * current_levels)
+    reward_success = reward_rate > reward_threshold
+    move_up = reward_success & distance_success
 
     commanded_distance = commanded_distance.clamp_min(terrain_length * 0.25)
     very_low_distance = distance < commanded_distance * low_distance_ratio_for_down

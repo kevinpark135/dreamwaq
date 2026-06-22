@@ -59,6 +59,20 @@ def empty_cenet_features(env) -> torch.Tensor:
     return torch.zeros((env.num_envs, 19), device=env.device)
 
 
+def configure_forward_heading_commands(command_cfg, fixed_heading: bool = False) -> None:
+    """Use forward body motion and heading control instead of backward/lateral velocity commands."""
+
+    command_cfg.heading_command = True
+    command_cfg.rel_heading_envs = 1.0
+    command_cfg.heading_control_stiffness = 1.0
+    command_cfg.ranges.lin_vel_x = (0.2, 1.0)
+    command_cfg.ranges.lin_vel_y = (0.0, 0.0)
+    command_cfg.ranges.ang_vel_z = (-1.2, 1.2)
+    if fixed_heading:
+        command_cfg.ranges.lin_vel_x = (1.0, 1.0)
+        command_cfg.ranges.heading = (0.0, 0.0)
+
+
 @configclass
 class DreamWaQCENetObsCfg(ObsGroup):
     """Placeholder for CENet velocity and latent context."""
@@ -110,6 +124,8 @@ class DreamWaQA1RoughEnvCfg(UnitreeA1RoughEnvCfg):
         self.curriculum.terrain_levels = CurrTerm(
             func=dreamwaq_terrain_levels,
         )
+
+        configure_forward_heading_commands(self.commands.base_velocity)
 
         configure_physx_gpu_capacity(self.sim.physics)
 
@@ -259,6 +275,8 @@ class DreamWaQA1RoughEnvCfg_PLAY(UnitreeA1RoughEnvCfg_PLAY):
         self.observations.policy.base_lin_vel = None
         self.observations.cenet = DreamWaQCENetObsCfg()
         self.observations.critic = DreamWaQCriticObsCfg()
+
+        configure_forward_heading_commands(self.commands.base_velocity, fixed_heading=True)
 
         self.events.base_external_force_torque = None
         self.events.push_robot = None
